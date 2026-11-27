@@ -370,6 +370,12 @@ async function showChannel(id) {
       <div id="slotlist"></div>
       <div id="sloted" class="slotedit" style="display:none"></div>
       <div class="row" style="margin-top:8px"><button class="btn" id="slot_add">+ Add a time slot</button></div></div>
+    <div class="card" id="maracard"><h2>🏃 Marathons</h2>
+      <p class="sub" style="margin-top:0">One show back to back, for 1 to 24 hours. Schedule one up to 7 days ahead. While it's on it takes over
+        the channel, including any time slots. Changes apply when you save.</p>
+      <div id="maralist"></div>
+      <div id="maraed" class="slotedit" style="display:none"></div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="mara_add">+ Schedule a marathon</button></div></div>
     <div class="card" id="poolcard"><h2>📊 What's on this channel</h2>
       <div class="row"><div class="seg" id="pool_mode">${[["items", "Items"], ["hours", "Hours"], ["plan", "Airtime goal"], ["sched", "Scheduled"]]
         .map(([k, l]) => `<button class="btn small" data-pm="${k}">${l}</button>`).join("")}</div><span class="spacer"></span><span class="sub" id="pool_total">Loading…</span></div>
@@ -770,25 +776,66 @@ loadStatus();
     const a = hm2min(s.start), b = s.play === "one" ? a + 30 : (hm2min(s.end) <= a ? hm2min(s.end) + 1440 : hm2min(s.end));
     return s.days.map((d) => [d * 1440 + a, d * 1440 + b]);
   }
+  const maraWindow = (s) => { if (!s.date) return null; const a = new Date(`${s.date}T${s.start || "20:00"}`); return [a, new Date(a.getTime() + (s.hours || 4) * 3600e3)]; };
+  function maraTakesOver(m) {     // regular time slots a marathon takes over: [[name, Date]]
+    const w = maraWindow(m), out = [];
+    if (!w || !m.enabled) return out;
+    for (const o of slots) {
+      if (o.kind === "marathon" || !o.enabled) continue;
+      for (let d = new Date(w[0].getTime() - 86400e3); d < w[1]; d = new Date(d.getTime() + 86400e3)) {
+        const ds = d.toLocaleDateString("en-CA");
+        if (o.repeat === "once" ? o.date !== ds : !o.days.includes((d.getDay() + 6) % 7) || (o.from_date && ds < o.from_date) || (o.until_date && ds > o.until_date)) continue;
+        const st = new Date(`${ds}T${o.start}`); let en = o.play === "one" ? new Date(st.getTime() + 1800e3) : new Date(`${ds}T${o.end === "24:00" ? "23:59" : o.end}`);
+        if (en <= st) en = new Date(en.getTime() + 86400e3);
+        if (st < w[1] && w[0] < en) { out.push([slotName(o), st, o]); break; }
+      }
+    }
+    return out;
+  }
   function slotWarnings(i) {
     const s = slots[i], w = [];
+    if (s.kind === "marathon") {
+      const win = maraWindow(s), now = new Date();
+      if (!s.sources.length) w.push("Pick the show.");
+      if (!win) w.push("Pick a date.");
+      else if (win[1] < now) w.push("This marathon is over. You can delete it.");
+      else if (win[0] - now > 7.05 * 86400e3) w.push("Marathons can be scheduled up to 7 days ahead.");
+      slots.forEach((o, j) => {
+        if (j === i || o.kind !== "marathon" || !o.enabled || !s.enabled) return;
+        const a = maraWindow(o);
+        if (a && win && a[0] < win[1] && win[0] < a[1]) w.push(`Overlaps the “${slotName(o)}” marathon: the one that starts first plays.`);
+      });
+      for (const [n, at] of maraTakesOver(s)) w.push(`Takes over the “${n}” time slot (${fmtDay(at / 1000)} ${fmtTime(at / 1000)}).`);
+      const inf = SLOTINFO[s.id];
+      if (inf && s.sources.length && !inf.items && !dirty) w.push("Nothing found in Jellyfin for this yet.");
+      return w;
+    }
     if (!s.sources.length) w.push("Pick what plays in this slot.");
     if (s.repeat === "weekly" && !s.days.length) w.push("Pick at least one day.");
     if (s.repeat === "once" && !s.date) w.push("Pick a date.");
     if (s.play === "fill" && s.start === s.end) w.push("Start and end are the same time.");
     const mine = slotRanges(s);
     slots.forEach((o, j) => {
-      if (j === i) return;
+      if (j === i || o.kind === "marathon") return;
       const hit = slotRanges(o).some(([a, b]) => mine.some(([c, d]) => [[0], [7 * 1440], [-7 * 1440]].some(([sh]) => c + sh < b && a < d + sh)));
       if (hit) w.push(`Overlaps “${slotName(o)}”. When they overlap, the one that starts first plays and the other is skipped that day${o.play === "one" || s.play === "one" ? "" : ""}.`);
     });
+    for (const m of slots) {
+      if (m.kind !== "marathon" || !s.enabled) continue;
+      const hit = maraTakesOver(m).find((x) => x[2] === s);
+      if (hit) w.push(`The “${slotName(m)}” marathon takes over this slot on ${fmtDay(hit[1] / 1000)}.`);
+    }
     const inf = SLOTINFO[s.id];
     if (inf && s.sources.length && !inf.items && !dirty) w.push("Nothing found in Jellyfin for this yet.");
     return w;
   }
   function drawSlots() {
     if (!$("#slotlist")) return;
-    $("#slotlist").innerHTML = slots.length ? slots.map((s, i) => {
+    const reg = slots.map((s, i) => [s, i]).filter(([s]) => s.kind !== "marathon");
+    const mar = slots.map((s, i) => [s, i]).filter(([s]) => s.kind === "marathon");
+    $("#maralist").innerHTML = mar.length ? mar.map(([s, i]) => maraRow(s, i)).join("") :
+      '<p class="sub">No marathons scheduled.</p>';
+    $("#slotlist").innerHTML = reg.length ? reg.map(([s, i]) => {
       const inf = SLOTINFO[s.id] || {}, warn = slotWarnings(i);
       const next = (inf.airings || [])[0];
       return `<div class="slotrow ${s.enabled ? "" : "off"} ${editing === i ? "editing" : ""}">
@@ -805,7 +852,7 @@ loadStatus();
     $$("[data-sled]").forEach((x) => (x.onclick = () => openSlot(+x.dataset.sled)));
     $$("[data-sldel]").forEach((x) => (x.onclick = () => {
       const i = +x.dataset.sldel;
-      if (!confirm(`Delete the time slot “${slotName(slots[i])}”?`)) return;
+      if (!confirm(`Delete ${slots[i].kind === "marathon" ? "the marathon" : "the time slot"} “${slotName(slots[i])}”?`)) return;
       slots.splice(i, 1); if (editing === i) closeSlot(); else if (editing > i) editing--;
       markDirty(); drawSlots();
     }));
@@ -818,6 +865,58 @@ loadStatus();
         toast("Next episode set: the schedule after what's on now was re-planned");
       } catch (e) { toast(e.message, true); }
     }));
+  }
+  function maraRow(s, i) {
+    const inf = SLOTINFO[s.id] || {}, warn = slotWarnings(i), win = maraWindow(s), now = new Date();
+    const when = win ? `${fmtDay(win[0] / 1000)} ${fmtTime(win[0] / 1000)} – ${win[1].toDateString() === win[0].toDateString() ? "" : fmtDay(win[1] / 1000) + " "}${fmtTime(win[1] / 1000)}` : "No date picked";
+    let status = "";
+    if (win && s.enabled) {
+      if (now >= win[0] && now < win[1]) status = `<b class="live">● On now</b>, until ${fmtTime(win[1] / 1000)}`;
+      else if (now < win[0]) { const m = Math.round((win[0] - now) / 60000);
+        status = `Starts in ${m >= 1440 ? Math.floor(m / 1440) + " day" + (m >= 2880 ? "s" : "") + " " : ""}${Math.floor(m % 1440 / 60)} h ${m % 60} min`; }
+      else status = "Finished";
+    }
+    const eps = inf.episodes || [], first = eps.find((e) => e.id === s.start_id) || eps[0];
+    const plan = (inf.airings || []).flatMap((a) => a.programs);
+    return `<div class="slotrow ${s.enabled ? "" : "off"} ${editing === i ? "editing" : ""}">
+      <label class="check" title="On / off"><input type="checkbox" data-slon="${i}" ${s.enabled ? "checked" : ""}></label>
+      <div class="slotmain"><b>${esc(slotName(s))}</b> <span class="sub">${esc(when)} · ${s.hours} hour${s.hours > 1 ? "s" : ""}</span>
+        <div class="sub">${status}${inf.items ? ` · ${inf.items} episode${inf.items > 1 ? "s" : ""} (${inf.hours} h)` : ""} · ${s.order === "shuffle" ? "shuffled" : first ? "starts with " + esc(first.label) : "in order"}${s.breaks ? "" : " · no commercials"}</div>
+        ${plan.length ? `<div class="sub">Planned: ${plan.slice(0, 4).map((p) => esc(p.subtitle || p.title)).join(", ")}${plan.length > 4 ? ` … ${esc(plan[plan.length - 1].subtitle || plan[plan.length - 1].title)} (${plan.length} in all)` : ""}</div>` : ""}
+        ${warn.map((x) => `<div class="sub warn">⚠ ${esc(x)}</div>`).join("")}</div>
+      <div class="row" style="gap:6px"><button class="btn small" data-sled="${i}">Edit</button><button class="btn small" data-sldel="${i}" title="Delete">✕</button></div></div>`;
+  }
+  function maraForm(s) {
+    const today = new Date(), max = new Date(today.getTime() + 7 * 86400e3);
+    return `<div class="form">
+      ${sourcePicker("sl", "Which show", "Usually a single series. A collection or a playlist works too.")}
+      <label class="f">Day<input type="date" id="sl_date" value="${esc(s.date)}" min="${today.toLocaleDateString("en-CA")}" max="${max.toLocaleDateString("en-CA")}"></label>
+      <label class="f">Starts at<input type="time" id="sl_start" value="${esc(s.start)}"></label>
+      <label class="f wide">How long: <b id="sl_hours_v"></b><input type="range" id="sl_hours" min="1" max="24" step="1" value="${s.hours || 4}">
+        <span class="row sub" style="justify-content:space-between"><span>1 hour</span><span>24 hours</span></span></label>
+      <label class="f wide">Start with<select id="sl_first"><option value="">The first episode</option></select>
+        <span class="sub" id="sl_first_note">Pick the show first.</span></label>
+      <label class="f wide">Order<select id="sl_order"><option value="sequential">In order, from there</option><option value="shuffle" ${s.order === "shuffle" ? "selected" : ""}>Shuffled</option></select></label>
+      <label class="f wide">When it's time to start<select id="sl_lead">${Object.entries(SLOT_LEAD).map(([k, v]) => `<option value="${k}" ${s.lead_in === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label class="f wide">If the last episode would run past the end<select id="sl_over">${Object.entries(SLOT_OVER).map(([k, v]) => `<option value="${k}" ${s.overrun === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label class="check wide"><input type="checkbox" id="sl_breaks" ${s.breaks ? "checked" : ""}> Commercial breaks during the marathon (the channel's own break settings)</label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="sl_done">Done</button><button class="btn" id="sl_cancel">Cancel</button>
+      <span class="sub">Then <b>Save</b> the channel to put it on the schedule.</span></div>`;
+  }
+  async function loadFirstEpisodes(s) {
+    const sel = $("#sl_first"), note = $("#sl_first_note");
+    if (!sel) return;
+    const src = s.sources[0];
+    if (!src) { sel.innerHTML = '<option value="">The first episode</option>'; note.textContent = "Pick the show first."; return; }
+    note.textContent = "Loading episodes…";
+    try {
+      const eps = await api("GET", `jellyfin/episodes?type=${encodeURIComponent(src.type)}&id=${encodeURIComponent(src.id)}`);
+      if (!$("#sl_first")) return;
+      sel.innerHTML = '<option value="">The first episode</option>' + eps.map((e) => `<option value="${esc(e.id)}" ${e.id === s.start_id ? "selected" : ""}>${esc(e.label)} (${e.minutes} min)</option>`).join("");
+      const mins = eps.reduce((a, e) => a + e.minutes, 0);
+      note.textContent = `${eps.length} episode${eps.length === 1 ? "" : "s"}, about ${Math.round(mins / 60)} hours in all${mins / 60 < (s.hours || 4) ? ": shorter than the marathon, so it starts over from the beginning when it runs out" : ""}.`;
+    } catch (e) { note.textContent = e.message; }
   }
   function slotForm(s) {
     return `<div class="form">
@@ -849,8 +948,24 @@ loadStatus();
   }
   function openSlot(i) {
     editing = i; editCopy = JSON.parse(JSON.stringify(slots[i]));
-    const s = slots[i], ed = $("#sloted");
-    ed.innerHTML = slotForm(s); ed.style.display = "";
+    const s = slots[i], mara = s.kind === "marathon", ed = $(mara ? "#maraed" : "#sloted");
+    ed.innerHTML = mara ? maraForm(s) : slotForm(s); ed.style.display = "";
+    if (mara) {
+      if (!s.sources.length) $("#sl-type").value = "series";
+      wireSourcePicker("sl", s.sources, () => { if (s.sources.length > 1) s.sources.splice(0, s.sources.length - 1); markDirty(); drawSlots(); loadFirstEpisodes(s); });
+      const msync = () => {
+        s.date = $("#sl_date").value; s.start = $("#sl_start").value || "20:00"; s.hours = +$("#sl_hours").value; s.start_id = $("#sl_first").value;
+        s.order = $("#sl_order").value; s.lead_in = $("#sl_lead").value; s.overrun = $("#sl_over").value; s.breaks = $("#sl_breaks").checked;
+        const w = maraWindow(s);
+        $("#sl_hours_v").textContent = `${s.hours} hour${s.hours > 1 ? "s" : ""}${w ? `, until ${w[1].toDateString() === w[0].toDateString() ? "" : fmtDay(w[1] / 1000) + " "}${fmtTime(w[1] / 1000)}` : ""}`;
+        drawSlots();
+      };
+      $$("input, select", ed).forEach((x) => { if (!/^sl-/.test(x.id)) x.addEventListener(x.type === "range" ? "input" : "change", msync); });
+      $("#sl_done").onclick = closeSlot;
+      $("#sl_cancel").onclick = () => { if (editCopy) slots[editing] = editCopy; if (editCopy && editCopy._new) slots.splice(editing, 1); closeSlot(); };
+      msync(); loadFirstEpisodes(s); ed.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return;
+    }
     wireSourcePicker("sl", s.sources, () => { markDirty(); drawSlots(); });
     const sync = () => {
       s.name = $("#sl_name").value.trim(); s.repeat = $("#sl_repeat").value; s.date = $("#sl_date").value; s.play = $("#sl_play").value;
@@ -872,7 +987,9 @@ loadStatus();
   }
   function closeSlot() {
     if (editing >= 0 && slots[editing]) delete slots[editing]._new;
-    editing = -1; editCopy = null; $("#sloted").style.display = "none"; $("#sloted").innerHTML = ""; drawSlots();
+    editing = -1; editCopy = null;
+    for (const x of ["#sloted", "#maraed"]) { $(x).style.display = "none"; $(x).innerHTML = ""; }
+    drawSlots();
   }
   async function loadSlots() {
     if (guide || !$("#slotlist")) return;
@@ -885,6 +1002,15 @@ loadStatus();
       slots.push({ id: "ts" + Date.now().toString(36), enabled: true, name: "", sources: [], repeat: "weekly", days: [0, 1, 2, 3, 4], date: "",
         from_date: "", until_date: "", start: "20:00", end: "21:00", play: "fill", order: "sequential", lead_in: "fit", overrun: "fit",
         breaks: true, exclusive: false, _new: true });
+      markDirty(); openSlot(slots.length - 1);
+      $("#sl_cancel").onclick = () => { slots.pop(); closeSlot(); };
+    };
+    $("#mara_add").onclick = () => {
+      if (editing >= 0) closeSlot();
+      const d = new Date(Date.now() + 86400e3);
+      slots.push({ id: "mr" + Date.now().toString(36), kind: "marathon", enabled: true, name: "", sources: [], repeat: "once", days: [],
+        date: d.toLocaleDateString("en-CA"), from_date: "", until_date: "", start: "20:00", end: "", hours: 4, start_id: "", play: "fill",
+        order: "sequential", lead_in: "fit", overrun: "fit", breaks: true, exclusive: false, _new: true });
       markDirty(); openSlot(slots.length - 1);
       $("#sl_cancel").onclick = () => { slots.pop(); closeSlot(); };
     };
@@ -972,7 +1098,7 @@ loadStatus();
       $("#sched").innerHTML = s.length ? `<table>${s.map((e) => {
         const day = fmtDay(e.start); const hdr = day !== lastDay ? `<tr><td colspan="2" class="sub"><b>${day}</b></td></tr>` : ""; lastDay = day;
         return hdr + `<tr class="${e.start <= now && now < e.end ? "on" : ""}"><td class="t">${fmtTime(e.start)}</td>
-          <td>${e.slot ? '<span title="Time slot">📅</span> ' : ""}<b>${esc(e.title)}</b> <span class="sub">${esc(e.subtitle || "")}</span></td></tr>`;
+          <td>${e.slot ? ((slots.find((x) => x.id === e.slot) || {}).kind === "marathon" ? '<span title="Marathon">🏃</span> ' : '<span title="Time slot">📅</span> ') : ""}<b>${esc(e.title)}</b> <span class="sub">${esc(e.subtitle || "")}</span></td></tr>`;
       }).join("")}</table>` : '<p class="sub">Nothing scheduled — add some sources and save.</p>';
       const on = $("#sched tr.on"); if (on) $("#sched").scrollTop = on.offsetTop - 40;
     } catch (e) { $("#sched").innerHTML = `<p class="sub">${esc(e.message)}</p>`; }

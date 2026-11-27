@@ -9,6 +9,10 @@ A slot is part of the channel's config:
      "lead_in": "fit" (start on time) | "cut" (cut off what's on) | "late" (let it finish; the slot starts late),
      "overrun": "fit" (end on time) | "finish" (let the last one finish) | "cut" (cut off at the end time),
      "breaks": True (the channel's commercial breaks), "exclusive": False (keep it out of regular programming)}
+
+A marathon is a one-time slot with "kind": "marathon": one show from "date" + "start" for "hours" (1-24) in a row,
+starting from "start_id" (an episode) or the first episode. Marathons win over regular time slots: a slot that's
+running when a marathon starts ends there, and slots that would start during a marathon are skipped.
 """
 import time
 from datetime import date, datetime, timedelta
@@ -46,9 +50,18 @@ def clean_slot(s, n=0):
                            if str(d).lstrip("-").isdigit() and 0 <= int(d) <= 6}),
            "date": _date(s.get("date")), "from_date": _date(s.get("from_date")), "until_date": _date(s.get("until_date")),
            "start": _hm(s.get("start"), "20:00"), "end": _hm(s.get("end"), "21:00"),
-           "breaks": s.get("breaks", True) is not False, "exclusive": bool(s.get("exclusive"))}
+           "breaks": s.get("breaks", True) is not False, "exclusive": bool(s.get("exclusive")),
+           "kind": "marathon" if s.get("kind") == "marathon" else "slot", "start_id": str(s.get("start_id") or "")[:80]}
     for k, opts in CHOICES.items():
         out[k] = s.get(k) if s.get(k) in opts else opts[0]
+    if out["kind"] == "marathon":
+        try:
+            out["hours"] = max(1, min(24, int(float(s.get("hours") or 4))))
+        except (TypeError, ValueError):
+            out["hours"] = 4
+        out["repeat"], out["play"], out["exclusive"] = "once", "fill", False
+        if out["order"] == "random":
+            out["order"] = "shuffle"
     return out
 
 
@@ -82,6 +95,10 @@ def occurrences(slot, t0, t1):
     once = date.fromisoformat(slot["date"]) if slot.get("repeat") == "once" and slot.get("date") else None
     if slot.get("repeat") == "once" and not once:
         return out
+    if slot.get("kind") == "marathon":
+        s = _local(once, slot["start"])
+        e = s + int(slot.get("hours") or 4) * 3600
+        return [(s, e)] if e > t0 and s < t1 else []
     while d <= last:
         ok = (d == once) if once else (d.weekday() in slot["days"] and (not lo or d >= lo) and (not hi or d <= hi))
         if ok:
@@ -101,14 +118,29 @@ def occurrences(slot, t0, t1):
 def all_occurrences(slots, t0, t1):
     """Every enabled slot's airings in time order, as {"slot", "start", "end", "key"}. When two overlap, the one that
     starts first wins and the other is skipped (on a tie, the slot higher in the list wins)."""
-    occ = []
-    for n, sl in enumerate(slots):
-        if sl.get("enabled", True) and sl.get("sources"):
-            occ += [{"slot": sl, "start": s, "end": e, "key": f"{sl['id']}@{int(s)}", "n": n} for s, e in occurrences(sl, t0, t1)]
-    occ.sort(key=lambda o: (o["start"], o["n"]))
-    out = []
-    for o in occ:
-        if out and o["start"] < out[-1]["end"] and out[-1]["slot"].get("play") != "one":
-            continue
-        out.append(o)
+    def collect(marathons):
+        occ = []
+        for n, sl in enumerate(slots):
+            if sl.get("enabled", True) and sl.get("sources") and (sl.get("kind") == "marathon") == marathons:
+                occ += [{"slot": sl, "start": s, "end": e, "key": f"{sl['id']}@{int(s)}", "n": n} for s, e in occurrences(sl, t0, t1)]
+        occ.sort(key=lambda o: (o["start"], o["n"]))
+        out = []
+        for o in occ:
+            if out and o["start"] < out[-1]["end"] and out[-1]["slot"].get("play") != "one":
+                continue
+            out.append(o)
+        return out
+    runs = collect(True)
+    out = list(runs)
+    for o in collect(False):
+        for m in runs:                      # marathons win
+            if o["start"] < m["end"] and m["start"] < o["end"]:
+                if o["start"] < m["start"] - 300 and o["slot"].get("play") != "one":
+                    o = dict(o, end=m["start"])          # a slot that's on when the marathon starts ends there
+                elif o["start"] >= m["start"] - 300:
+                    o = None
+                    break
+        if o:
+            out.append(o)
+    out.sort(key=lambda o: o["start"])
     return out

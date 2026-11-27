@@ -534,6 +534,18 @@ class Handler(BaseHTTPRequestHandler):
                               "users": users})
         if path == "jellyfin/sources":
             return self.json(sched.jellyfin().list_sources(qs.get("type", "library"), qs.get("q", "")))
+        if path == "jellyfin/episodes":       # what a source holds, in order (marathon "start with" picker)
+            from .jellyfin import normalize_item
+            from .scheduler import _ep_label, sort_key
+            raw = sched.jellyfin().resolve_source({"type": qs.get("type", "series"), "id": qs.get("id", "")},
+                                                  ["Movie", "Episode", "MusicVideo", "Video"])
+            its = [normalize_item(r) for r in raw]
+            its = [i for i in its if i["duration"] >= 5 and i["location"] != "Virtual"]
+            if qs.get("type") != "playlist":
+                its.sort(key=sort_key)
+            return self.json([{"id": i["id"], "label": (f"{_ep_label(i)} · {i.get('episode_title') or i['title']}"
+                                                         if i["type"] == "Episode" else i["title"]),
+                               "minutes": round(i["duration"] / 60)} for i in its[:3000]])
         if path == "guide":
             hours = min(12.0, float(qs.get("hours", 3)))
             now = time.time()

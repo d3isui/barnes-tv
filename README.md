@@ -39,7 +39,7 @@ that already comes with Jellyfin.
 | <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Building a channel: sources, logo, clock, breaks and a live preview.</sub> |
 | <img src="docs/screenshots/admin-commercials.png" alt="Commercial compilation review"><br><sub>Long commercial compilations are split into separate ads automatically.</sub> | <img src="docs/screenshots/admin-bumpers.png" alt="Bumper library"><br><sub>60+ built-in bumpers, including ones that quote the weather.</sub> |
 | <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | <img src="docs/screenshots/admin-balance.png" alt="Channel pool breakdown"><br><sub>What each channel is made of, with optional airtime balancing per show.</sub> |
-| <img src="docs/screenshots/admin-timeslots.png" alt="Time slots"><br><sub>Time slots: a show at set times, picking up with the next episode.</sub> | |
+| <img src="docs/screenshots/admin-timeslots.png" alt="Time slots"><br><sub>Time slots: a show at set times, picking up with the next episode.</sub> | <img src="docs/screenshots/admin-marathons.png" alt="Marathons"><br><sub>Marathons: one show back to back for up to 24 hours.</sub> |
 
 <sub>Screenshots use a demo library of made-up shows. The demo's weather map is a simplified drawing, not real map tiles.</sub>
 
@@ -61,6 +61,7 @@ that already comes with Jellyfin.
   turn this off.
 - **Time slots.** Put a show, movie or collection on at set times, for example *The Simpsons, Mon–Fri 8–9 PM* or
   *a movie every Friday at 8*. Regular programming fills the rest of the day.
+- **Marathons.** One show back to back for 1 to 24 hours, scheduled up to 7 days ahead.
 - **See what a channel is made of, and balance it.** Each channel's page has a pie chart of its pool, by number of
   items or by hours, plus the airtime each show is set to get and what's actually scheduled. Balancing is off by
   default. You can slide **Even out the shows** toward equal time so a 300-episode show doesn't drown out a
@@ -232,6 +233,25 @@ Each slot in the list shows what it found in Jellyfin and when it airs next, wit
 If two slots overlap, the card warns you. When they overlap, the one that starts first plays and the other is skipped
 that day. Time slots appear in the schedule, the guide and the EPG like any other program, marked 📅 on the channel's
 page. Saving re-plans the schedule, starting after whatever is on now.
+
+### Marathons
+
+Under **Edit channel → Marathons**, **+ Schedule a marathon** puts one show on back to back. You choose:
+
+- **Which show:** usually a single series. A collection or playlist also works.
+- **Day and start time:** up to 7 days ahead.
+- **How long:** 1 to 24 hours. The slider shows when it will end.
+- **Start with:** the first episode or any episode you pick. The marathon plays **in order** from there, or
+  **shuffled**. If the show runs out before the marathon ends, it starts over from the beginning.
+- **When it's time to start** and **if the last episode would run past the end:** the same choices as time slots.
+- **Commercial breaks** during the marathon.
+
+While a marathon is on it takes over the channel, including its time slots. A time slot that's running when the
+marathon starts ends there, and slots that would start during it are skipped that day. The Time slots and Marathons
+cards both say when this happens. Each marathon in the list shows when it starts (or that it's on now), the episodes
+it has planned, and any warnings. The channel's schedule marks marathon programs with 🏃. A channel plans far enough
+ahead to include an upcoming marathon, so it's in the guide and the EPG as soon as you save, even if it's further out
+than **Days of schedule to plan ahead**. Finished marathons stay in the list until you delete them.
 
 ### Commercial breaks
 

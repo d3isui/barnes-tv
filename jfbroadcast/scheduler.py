@@ -809,6 +809,8 @@ class ScheduleManager:
         start = (st.get("slot_start") or {}).get(sid)
         if start and start.get("id") in pos and (ref is None or ref["s"] < start.get("at", 0) - 1):
             return eps[pos[start["id"]]]
+        if not ref and sl.get("kind") == "marathon" and not (st.get("slot_aired") or {}).get(sid):
+            return eps[pos[sl["start_id"]]] if sl.get("start_id") in pos else eps[0]
         last = ref["i"]["id"] if ref else (st.get("slot_aired") or {}).get(sid)
         if last in pos:
             return eps[(pos[last] + 1) % len(eps)]
@@ -949,6 +951,10 @@ class ScheduleManager:
                 tl[:] = keep_through_current(tl, now)
                 log.info("channel %s now has programming; replacing placeholders", ch["name"])
             horizon = now + float(self.store.settings.get("schedule_days") or 3) * 86400
+            if ch.get("slots"):          # plan far enough ahead to include upcoming marathons (up to 8 days)
+                runs = [o["end"] for o in all_occurrences([x for x in clean_slots(ch["slots"]) if x["kind"] == "marathon"],
+                                                          now, now + 8 * 86400)]
+                horizon = max([horizon] + [min(e, now + 8 * 86400) for e in runs])
             if tl and tl[-1]["s"] + tl[-1]["d"] >= horizon - 3600:
                 return list(tl)
             pool = self.pool(ch)
