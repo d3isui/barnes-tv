@@ -1,0 +1,12 @@
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+# your signing key and its password: never publish these
+*.keystore
+*.jks
+keystore.properties
+# branding kits you built with
+branding/
+branding.zip

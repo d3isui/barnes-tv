@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b1a4a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="%%TITLE%%">
+  <link rel="manifest" href="/static/%%MODE%%.webmanifest">
+  <link rel="icon" href="/favicon.png?v=%%BRANDV%%" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png?v=%%BRANDV%%">
+  <title>%%TITLE%% — %%BRAND%%</title>
+  <script>window.BRAND = %%BRANDJSON%%;</script>
+  <style>
+    :root { --line: #5b7be0; --yellow: #ffd23f; --sub: #bfdbfe; --tvtext: #fff; --tvp: #0b1a4a; --tvp-a: #0b1a4acc; --tvh: #1e3a8a;
+      --tvhi: #2b4bc7; --tvbg: #08123af2; --tvgrad: radial-gradient(circle at 50% 0%, #1e3a8a, #050a1f 70%);
+      --tvbanner: linear-gradient(180deg, #1e3a8aee, #0b1a4aee); --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --font-display: var(--font);
+      --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: #000; color: var(--tvtext); font: 16px/1.4 var(--font);
+      overflow: hidden; overscroll-behavior: none; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+    canvas#noise { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .25s; pointer-events: none; image-rendering: pixelated; }
+    canvas#noise.on { opacity: 1; }
+    #osd { position: fixed; top: calc(3vh + var(--safe-t)); right: 5vw; font: 700 clamp(28px, 6vh, 64px)/1 "Courier New", monospace; color: #4ade80;
+      text-shadow: 0 0 8px #16a34a, 2px 2px 0 #000; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 30; }
+    #osd.on { opacity: 1; }
+    #msg { position: fixed; top: 42%; left: 5vw; right: 5vw; text-align: center; font-size: clamp(16px, 3vh, 26px); color: #fca5a5; text-shadow: 0 2px 6px #000; display: none; z-index: 30; }
+
+    /* ---------- info banner */
+    #banner { position: fixed; left: 4vw; right: 4vw; bottom: calc(5vh + var(--safe-b)); display: flex; gap: 2vw; align-items: center; padding: 14px 18px;
+      border-radius: 14px; background: var(--tvbanner); border: 1px solid var(--line); box-shadow: 0 10px 40px #000a;
+      transform: translateY(20px); opacity: 0; transition: all .35s; pointer-events: none; z-index: 10; }
+    #banner.on { transform: none; opacity: 1; }
+    body.ui #banner { bottom: calc(96px + var(--safe-b)); }
+    #banner img { height: clamp(36px, 9vh, 90px); max-width: 16vh; object-fit: contain; }
+    #banner .num { font-size: clamp(26px, 6vh, 60px); font-weight: 800; color: var(--yellow); min-width: 1.6em; text-align: center; }
+    #banner .t { font-size: clamp(17px, 3.4vh, 34px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #banner .s { color: var(--sub); font-size: clamp(13px, 2.3vh, 22px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #banner .bar, .np .bar { height: 6px; background: #ffffff22; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+    #banner .bar div, .np .bar div { height: 100%; background: var(--yellow); }
+    #banner .nx { color: var(--tvtext); opacity: .85; font-size: clamp(12px, 2.1vh, 20px); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #banner .clock { margin-left: auto; text-align: right; font-size: clamp(15px, 3vh, 30px); font-weight: 700; white-space: nowrap; }
+
+    @media (max-width: 520px) {
+      #banner { left: 8px; right: 8px; gap: 10px; padding: 10px 12px; }
+      #banner .clock { display: none; }
+      #banner img { height: 34px; max-width: 54px; }
+      #banner .num { font-size: 26px; min-width: 1.2em; }
+      #banner .t { font-size: 17px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+      #banner .s, #banner .nx { font-size: 13px; }
+      body.ui #banner { bottom: calc(92px + var(--safe-b)); }
+    }
+
+    /* ---------- volume HUD */
+    #vol { position: fixed; top: calc(3vh + var(--safe-t)); left: 50%; transform: translateX(-50%); background: var(--tvp-a); border: 1px solid var(--line);
+      border-radius: 12px; padding: 10px 18px; display: flex; gap: 12px; align-items: center; font-weight: 700; opacity: 0; transition: opacity .3s;
+      pointer-events: none; z-index: 40; }
+    #vol.on { opacity: 1; }
+    #vol .bar { width: min(260px, 40vw); height: 10px; background: #ffffff22; border-radius: 8px; overflow: hidden; }
+    #vol .bar div { height: 100%; background: var(--yellow); }
+
+    /* ---------- control bar (watch mode) */
+    #controls { position: fixed; left: 50%; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%); display: flex; gap: 6px; align-items: center;
+      padding: 6px; border-radius: 16px; background: var(--tvp-a); border: 1px solid var(--line); opacity: 0; pointer-events: none; transition: opacity .25s;
+      max-width: calc(100vw - 16px); z-index: 20; backdrop-filter: blur(6px); }
+    body.ui #controls { opacity: 1; pointer-events: auto; }
+    #controls button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 52px; height: 52px;
+      padding: 4px 10px; border-radius: 12px; border: 0; background: transparent; }
+    #controls button:active, #controls button:hover { background: var(--tvh); }
+    #controls button i { font-style: normal; font-size: 20px; line-height: 1; }
+    #controls button span { font-size: 11px; color: var(--sub); white-space: nowrap; }
+    #controls .volbox { display: flex; align-items: center; padding: 0 8px; }
+    #controls input[type=range] { width: 120px; accent-color: var(--yellow); }
+    #controls .sep { width: 1px; align-self: stretch; background: var(--line); margin: 4px 2px; }
+    @media (pointer: coarse) { #controls .volbox { display: none; } }
+    @media (max-width: 520px) {
+      #controls { gap: 0; padding: 4px; width: calc(100vw - 16px); justify-content: space-between; }
+      #controls button { min-width: 0; flex: 1; padding: 4px 2px; height: 56px; }
+      #controls .sep { display: none; }
+    }
+
+    /* ---------- guide overlay */
+    #guide { position: fixed; inset: calc(4vh + var(--safe-t)) 4vw calc(4vh + var(--safe-b)); background: var(--tvbg); border: 1px solid var(--line);
+      border-radius: 16px; display: none; flex-direction: column; overflow: hidden; z-index: 35; }
+    #guide.on { display: flex; }
+    #guide header { display: flex; align-items: center; padding: 12px 16px; background: var(--tvh); font-weight: 800; font-size: 20px; color: var(--yellow); gap: 12px; }
+    #guide header span { color: var(--tvtext); font-weight: 600; font-size: 15px; }
+    #guide header .hint { margin-left: auto; font-size: 13px; color: var(--sub); font-weight: 500; }
+    #guide header #grelock { margin-left: auto; }
+    #guide header #grelock + #gclose { margin-left: 8px; }
+    #guide header button { margin-left: auto; background: var(--tvp); border: 1px solid var(--line); border-radius: 10px; padding: 6px 14px; }
+    #glist { overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
+    .gi { display: grid; grid-template-columns: 56px 72px 1fr 1fr; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid color-mix(in srgb, var(--tvtext) 12%, transparent); cursor: pointer; }
+    .gi:hover, .gi.sel { background: var(--tvhi); }
+    .gi.cur { box-shadow: inset 4px 0 0 var(--yellow); }
+    .gi .n { color: var(--yellow); font-weight: 800; font-size: 24px; text-align: center; }
+    .gi img { height: 40px; width: 72px; object-fit: contain; }
+    .gi b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .gi small { color: var(--sub); display: block; }
+    @media (max-width: 640px) {
+      #guide { inset: calc(8px + var(--safe-t)) 8px calc(8px + var(--safe-b)); }
+      #guide header .hint { display: none; }
+      .gi { grid-template-columns: 44px 1fr; grid-template-rows: auto auto; gap: 2px 12px; padding: 10px 12px; }
+      .gi img { display: none; }
+      .gi .n { grid-row: 1 / span 2; font-size: 22px; }
+      .gi > div:last-child { opacity: .8; font-size: 14px; }
+      .gi > div:last-child small:first-child { display: inline; } .gi > div:last-child b { display: inline; }
+    }
+
+    /* ---------- remote (casting) */
+    #remote { position: fixed; inset: 0; display: none; overflow-y: auto; background: var(--tvgrad); z-index: 25;
+      padding: calc(12px + var(--safe-t)) 16px calc(20px + var(--safe-b)); }
+    #remote.on { display: block; }
+    #remote .wrap { max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    #remote .top { display: flex; align-items: center; gap: 10px; }
+    #remote .tvbtn { flex: 1; display: flex; align-items: center; gap: 10px; background: var(--tvp-a); border: 1px solid var(--line); border-radius: 14px;
+      padding: 10px 14px; text-align: left; min-width: 0; }
+    #remote .tvbtn b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #remote .tvbtn small { color: var(--sub); }
+    #remote .dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; flex: none; }
+    #remote .dot.ok { background: #22c55e; box-shadow: 0 0 8px #22c55e; } #remote .dot.err { background: #ef4444; } #remote .dot.wait { background: var(--yellow); }
+    .np { background: var(--tvp-a); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; grid-template-columns: 64px 1fr; gap: 4px 14px; align-items: center; }
+    .np img { width: 64px; height: 48px; object-fit: contain; grid-row: 1 / span 2; }
+    .np .ch { font-weight: 800; color: var(--yellow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .np .t { font-size: 18px; font-weight: 700; line-height: 1.25; }
+    .np .meta { grid-column: 1 / -1; }
+    .np .s { color: var(--sub); font-size: 14px; }
+    .np .times { display: flex; justify-content: space-between; color: var(--sub); font-size: 12px; margin-top: 4px; }
+    #caststatus { font-size: 14px; min-height: 20px; text-align: center; color: var(--sub); }
+    #caststatus.error { color: #fca5a5; } #caststatus.ok { color: #86efac; }
+    .pad { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: 14px; align-items: stretch; }
+    .rocker { display: flex; flex-direction: column; border-radius: 40px; background: var(--tvp); border: 1px solid var(--line); overflow: hidden; }
+    .rocker button { flex: 1; min-height: 72px; border: 0; background: transparent; font-size: 30px; }
+    .rocker button:active { background: var(--tvhi); }
+    .rocker span { text-align: center; font-size: 12px; letter-spacing: .12em; color: var(--sub); padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .center { display: grid; grid-template-rows: repeat(3, 1fr); gap: 10px; }
+    .rbtn { border-radius: 16px; border: 1px solid var(--line); background: var(--tvp-a); padding: 10px; font-size: 15px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px; min-height: 48px; }
+    .rbtn i { font-style: normal; font-size: 20px; }
+    .rbtn:active { background: var(--tvhi); }
+    .rbtn.on { border-color: var(--yellow); color: var(--yellow); }
+    .rbtn.fixbtn { flex-direction: row; gap: 10px; font-size: 14px; }
+    .volrow { display: flex; align-items: center; gap: 12px; background: var(--tvp-a); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; }
+    .volrow input { flex: 1; accent-color: var(--yellow); height: 28px; }
+    #numpad { display: none; }
+    #numpad.on { display: block; }
+    #numdisp { text-align: center; font: 700 30px "Courier New", monospace; color: #4ade80; min-height: 40px; letter-spacing: .1em; }
+    .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .keys button { min-height: 56px; font-size: 24px; font-weight: 700; border-radius: 14px; border: 1px solid var(--line); background: var(--tvp); }
+    .keys button:active { background: var(--tvhi); }
+    .stop { border-radius: 14px; border: 1px solid #7f1d1d; background: #3b0d0d; color: #fecaca; padding: 14px; font-weight: 600; }
+    .hintline { text-align: center; color: var(--sub); opacity: .8; font-size: 12px; }
+
+    /* ---------- cast picker */
+    #castpick { position: fixed; inset: 0; background: #000b; display: none; place-items: center; z-index: 45; padding: 16px; }
+    #castpick.on { display: grid; }
+    #castpick .box { background: var(--tvp); border: 1px solid var(--line); border-radius: 18px; padding: 20px; width: min(460px, 100%); max-height: 90vh; overflow-y: auto; }
+    #castpick h2 { margin: 0 0 6px; } #castpick .hint { color: var(--sub); font-size: 14px; }
+    #castpick button.dev { display: block; width: 100%; text-align: left; margin: 10px 0; background: var(--tvp-a); border: 1px solid var(--line);
+      border-radius: 12px; padding: 14px 16px; font-size: 17px; }
+    #castpick button.dev small { display: block; color: var(--sub); font-size: 13px; margin-top: 2px; }
+    #castpick button.dev.on { border-color: var(--yellow); }
+    #castpick .x { background: transparent; border: 1px solid var(--line); border-radius: 10px; padding: 10px 18px; margin-top: 6px; }
+
+    /* ---------- channel lock */
+    #lock { position: fixed; inset: 0; display: none; place-items: center; z-index: 47; padding: 16px; overflow-y: auto;
+      background: radial-gradient(circle at 50% 30%, #3b0d3b, #07051a 75%); }
+    #lock.on { display: grid; }
+    #lock .box { width: min(380px, 100%); text-align: center; display: flex; flex-direction: column; gap: 12px; }
+    #lock .lk { font-size: 54px; line-height: 1; }
+    #lock img { height: 56px; max-width: 120px; object-fit: contain; margin: 0 auto; }
+    #lock h2 { margin: 0; font-size: 22px; } #lock p { margin: 0; color: var(--sub); }
+    #pin { font: 700 34px "Courier New", monospace; letter-spacing: .35em; min-height: 44px; color: #fff; }
+    #pinmsg { min-height: 20px; color: #fca5a5; font-size: 14px; }
+    #lock .keys button { min-height: 60px; }
+    #lock .kids { border-radius: 14px; border: 1px solid #22c55e; background: #052e1a; color: #bbf7d0; padding: 12px; font-weight: 600; }
+    .shake { animation: shake .35s; }
+    @keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+    .lockbtn { border-radius: 10px; border: 1px solid var(--line); background: var(--tvp); padding: 6px 12px; }
+
+    /* ---------- power-on screen */
+    /* screen off: pure black over everything while the sound keeps playing (any button brings the picture back) */
+    #blackout { position: fixed; inset: 0; background: #000; z-index: 49; display: none; cursor: none; }
+    #blackout.on { display: block; }
+    #blackout .hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; color: #9ca3af;
+      font-size: clamp(14px, 2.4vh, 22px); line-height: 1.6; transition: opacity 1.2s; }
+    #blackout .hint.gone { opacity: 0; }
+    #power { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(#111827, #000); cursor: pointer; z-index: 50;
+      text-align: center; padding: 24px; }
+    #power .b { font-size: 56px; width: 112px; height: 112px; border-radius: 50%; border: 3px solid #ef4444; display: grid; place-items: center;
+      margin: 0 auto 20px; color: #ef4444; box-shadow: 0 0 30px #ef444466; }
+    #power .wordmark { width: min(520px, 80vw); display: block; margin: 0 auto 28px; filter: drop-shadow(0 0 18px #3b82f655); }
+    #power p { color: #9ca3af; max-width: 560px; margin: 8px auto; }
+    kbd { background: #ffffff22; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+    @media (pointer: coarse) { .keyhelp { display: none; } }
+    body.mode-remote { background: var(--tvgrad); }
+    body.app #controls, body.app #power, body.app .keyhelp, body.app #grelock + #gclose { display: none !important; }
+    body.app #lock .keys button.focus, body.app #lockkids.focus { outline: 4px solid var(--yellow); outline-offset: 2px; transform: scale(1.06); }
+    body.app { cursor: none; }
+    body.mode-remote video, body.mode-remote #controls, body.mode-remote #banner, body.mode-remote canvas#noise { display: none; }
+  </style>
+  <link rel="stylesheet" href="/theme.css">
+</head>
+<body class="mode-%%MODE%%">
+  <video id="v" playsinline></video>
+  <canvas id="noise" width="320" height="180"></canvas>
+  <div id="osd"></div>
+  <div id="msg"></div>
+  <div id="vol"><span id="volicon">🔊</span><div class="bar"><div id="volbar"></div></div><span id="volnum">100</span></div>
+  <div id="banner"></div>
+
+  <div id="blackout" aria-hidden="true"><div class="hint">🌙 Screen off · the sound keeps playing<br><span id="wakehint">Press any button to turn the picture back on</span></div></div>
+  <div id="guide"><header>GUIDE <span id="gclock"></span><span class="hint">↑↓ choose · Enter tune · G close</span>
+    <button id="grelock" class="lockbtn" style="display:none" title="Lock the locked channels again">🔒 Lock</button>
+    <button id="gclose" aria-label="Close guide">Close</button></header><div id="glist"></div></div>
+
+  <div id="controls">
+    <button data-a="down" aria-label="Channel down"><i>▼</i><span>Ch −</span></button>
+    <button data-a="up" aria-label="Channel up"><i>▲</i><span>Ch +</span></button>
+    <div class="sep"></div>
+    <button data-a="guide" aria-label="Guide"><i>☰</i><span>Guide</span></button>
+    <button data-a="info" aria-label="Info"><i>ⓘ</i><span>Info</span></button>
+    <button data-a="mute" aria-label="Mute"><i id="muteicon">🔊</i><span>Sound</span></button>
+    <button data-a="screen" id="screenbtn" aria-label="Turn the screen off, keep the sound"><i>🌙</i><span>Screen off</span></button>
+    <span class="volbox"><input type="range" id="localvol" min="0" max="100" value="100" aria-label="Volume"></span>
+    <div class="sep"></div>
+    <button data-a="cast" aria-label="Cast to a TV"><i>📺</i><span>Cast</span></button>
+    <button data-a="full" id="fullbtn" aria-label="Fullscreen"><i>⛶</i><span>Full</span></button>
+  </div>
+
+  <div id="remote"><div class="wrap">
+    <div class="top">
+      <button class="tvbtn" data-a="cast"><span class="dot" id="castdot"></span><img src="/brand/mark.png?v=%%BRANDV%%" alt="" class="brandart" style="height:26px;flex:none"><span style="min-width:0"><small>Remote for</small><b id="castname">TV</b></span><span style="margin-left:auto">▾</span></button>
+    </div>
+    <div class="np">
+      <img id="castlogo" alt="">
+      <div class="ch" id="castnow"></div>
+      <div class="t" id="casttitle"></div>
+      <div class="meta"><div class="s" id="castsub"></div>
+        <div class="bar"><div id="castprog"></div></div>
+        <div class="times"><span id="casttimes"></span><span id="castnext"></span></div></div>
+    </div>
+    <div id="caststatus"></div>
+    <div class="pad">
+      <div class="rocker"><button data-a="up" aria-label="Channel up">▲</button><span>CH</span><button data-a="down" aria-label="Channel down">▼</button></div>
+      <div class="center">
+        <button class="rbtn" data-a="guide"><i>☰</i>Guide</button>
+        <button class="rbtn" data-a="numpad" id="numbtn"><i>#</i>Number</button>
+        <button class="rbtn" data-a="mute" id="castmute"><i>🔇</i>Mute</button>
+      </div>
+      <div class="rocker"><button data-a="volup" aria-label="Volume up">+</button><span>VOL</span><button data-a="voldown" aria-label="Volume down">−</button></div>
+    </div>
+    <div class="volrow"><span>🔈</span><input type="range" id="castvol" min="0" max="100" value="50" aria-label="TV volume"><span>🔊</span></div>
+    <div id="numpad"><div id="numdisp"></div><div class="keys">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="back">⌫</button><button data-k="0">0</button><button data-k="go">✓</button></div></div>
+    <button class="rbtn fixbtn" data-a="reload" title="Picture frozen or stuck loading? Load the channel on the TV again"><i>↻</i>Picture stuck? Restart the stream on the TV</button>
+    <button class="stop" data-a="stopcast" id="stopbtn">Stop casting</button>
+    <img src="/brand/wordmark.png?v=%%BRANDV%%" alt="%%BRAND%%" class="brandart" style="width:180px;margin:6px auto 0;opacity:.55;display:block">
+    <div class="hintline">Channel changes take a few seconds to show up on the TV.
+      <a href="#" id="rrelock" style="display:none;color:var(--sub);margin-left:6px">🔒 Lock channels again</a></div>
+  </div></div>
+
+  <div id="lock"><div class="box">
+    <div class="lk">🔒</div><img id="locklogo" alt="">
+    <h2 id="locktitle">This channel is locked</h2><p>Enter the channel lock code to watch.</p>
+    <div id="pin"></div><div id="pinmsg"></div>
+    <div class="keys">
+      <button data-p="1">1</button><button data-p="2">2</button><button data-p="3">3</button>
+      <button data-p="4">4</button><button data-p="5">5</button><button data-p="6">6</button>
+      <button data-p="7">7</button><button data-p="8">8</button><button data-p="9">9</button>
+      <button data-p="back">⌫</button><button data-p="0">0</button><button data-p="go">✓</button></div>
+    <button class="kids" id="lockkids">🧸 Go to a kids channel</button>
+  </div></div>
+
+  <div id="castpick"><div class="box"><h2>Cast to a TV</h2><div class="hint" id="casthint">Looking for Chromecasts…</div>
+    <div id="castlist"></div><button class="x" id="castclose">Close</button></div></div>
+
+  <div id="power"><div>
+    <img src="/brand/wordmark.png?v=%%BRANDV%%" alt="%%BRAND%%" class="wordmark">
+    <div class="b">⏻</div><h2 id="powertitle">Turn on the TV</h2>
+    <p id="powertext">Tap anywhere to start.</p>
+    <p class="keyhelp"><kbd>↑</kbd><kbd>↓</kbd> channel · <kbd>+</kbd><kbd>−</kbd> volume · type a number · <kbd>G</kbd> guide · <kbd>I</kbd> info · <kbd>F</kbd> fullscreen · <kbd>C</kbd> cast</p>
+  </div></div>
+  <script src="/static/vendor/mpegts.js"></script>
+  <script src="/static/tv.js"></script>
+</body>
+</html>

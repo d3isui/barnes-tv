@@ -1,0 +1,8 @@
+# your server's settings, schedules, caches, logs and uploads
+data/
+.venv/
+__pycache__/
+*.pyc
+*.log
+# built app files (build your own: see README -> TV app)
+web/app/*.apk

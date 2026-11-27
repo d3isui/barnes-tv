@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="/favicon.png?v=%%BRANDV%%" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png?v=%%BRANDV%%">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%%BRAND%%</title>
+  <script>window.BRAND = %%BRANDJSON%%;</script>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/theme.css" id="themecss">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="/brand/mark.png?v=%%BRANDV%%" alt="" class="mark brandart"><span id="station">%%BRAND%%</span><span id="ver" class="badge" title="App version"></span></div>
+    <nav>
+      <a href="#/channels" data-nav="channels">Channels</a>
+      <a href="#/guide" data-nav="guide">Guide</a>
+      <a href="#/bumpers" data-nav="bumpers">Bumpers</a>
+      <a href="#/connect" data-nav="connect">Connect to Jellyfin</a>
+      <a href="#/appearance" data-nav="appearance">Appearance</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
+    </nav>
+    <a class="btn" href="/remote" target="_blank" title="Phone remote for casting">📱 Remote</a>
+    <a class="btn primary" href="/tv" target="_blank">▶ Watch TV</a>
+  </header>
+  <main id="view"></main>
+  <script src="/static/vendor/qrcode.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

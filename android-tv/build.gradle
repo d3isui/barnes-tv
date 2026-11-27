@@ -1,0 +1,50 @@
+// Barnes TV for Google TV / Android TV. Open this folder in Android Studio and use Build > Build APK(s),
+// or run build.py (no Android Studio needed). The app has no third-party libraries.
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+android {
+    namespace 'tv.barnes.broadcast'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "tv.barnes.broadcast"
+        minSdk 21
+        targetSdk 35          // current Android: no "built for an older version of Android" warning
+        versionCode 2
+        versionName "1.1"
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            res.srcDirs = ['res']
+        }
+    }
+
+    // Your own signing key (made by build.py on first run, never committed): every build is signed with the same
+    // key, so a newer version installs over an older one. Run "python build.py --keystore-only" to create it.
+    def signing = new Properties()
+    def signingFile = file('keystore.properties')
+    if (signingFile.exists()) signingFile.withInputStream { signing.load(it) }
+    signingConfigs {
+        own {
+            if (signingFile.exists()) {
+                storeFile file(signing['storeFile'])
+                storePassword signing['storePassword']
+                keyAlias signing['keyAlias']
+                keyPassword signing['keyPassword']
+            }
+        }
+    }
+    buildTypes {
+        release { if (signingFile.exists()) signingConfig signingConfigs.own; minifyEnabled false }
+        debug { if (signingFile.exists()) signingConfig signingConfigs.own }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
