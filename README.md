@@ -36,7 +36,7 @@ that already comes with Jellyfin.
 
 | | |
 |---|---|
-| <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Building a channel: sources, logo, clock, breaks and a live preview.</sub> |
+| <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Editing a channel: Appearance, Scheduling, Commercials and Bumpers tabs, with a live preview.</sub> |
 | <img src="docs/screenshots/admin-commercials.png" alt="Commercial compilation review"><br><sub>Long commercial compilations are split into separate ads automatically.</sub> | <img src="docs/screenshots/admin-bumpers.png" alt="Bumper library"><br><sub>60+ built-in bumpers, including ones that quote the weather.</sub> |
 | <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | <img src="docs/screenshots/admin-balance.png" alt="Channel pool breakdown"><br><sub>What each channel is made of, with optional airtime balancing per show.</sub> |
 | <img src="docs/screenshots/admin-timeslots.png" alt="Time slots"><br><sub>Time slots: a show at set times, picking up with the next episode.</sub> | <img src="docs/screenshots/admin-marathons.png" alt="Marathons"><br><sub>Marathons: one show back to back for up to 24 hours.</sub> |
@@ -170,6 +170,17 @@ IP. You can pin that address under **Settings → Address Jellyfin uses to reach
 
 ## Building channels: recipes
 
+A channel's page is split into four tabs:
+
+- **🎨 Appearance:** name, number, group, theme, sleep timer, subtitles, the channel logo, the clock and the "Up next"
+  banner, with a live preview. Restart stream, Log and Delete channel are here too.
+- **📅 Scheduling:** what plays, the order, start times, time slots, marathons, the pool breakdown and the live schedule.
+- **📢 Commercials:** commercial breaks and compilation splitting.
+- **✨ Bumpers:** which bumpers play, where and how often.
+
+Guide and weather channels have **Appearance** and **Guide** / **Weather** tabs. The page remembers the last tab you
+used, and a dot on a tab marks unsaved changes. One **Save** button saves all the tabs.
+
 | Channel | Sources | Order | Start times | Extras |
 |---|---|---|---|---|
 | **Saturday Morning Cartoons** | Genre *Animation*, with Genre *Horror* excluded | Rotate shows | Half hour | Filler: a "Commercials" library of old ads |
@@ -202,7 +213,7 @@ return to the original behavior.
 
 ### Time slots
 
-Under **Edit channel → Time slots**, **+ Add a time slot** puts something on at set times. Regular programming fills
+Under **Edit channel → Scheduling → Time slots**, **+ Add a time slot** puts something on at set times. Regular programming fills
 the rest of the day. For each slot you choose:
 
 - **What plays:** a series, collection, playlist, genre, or anything else you can add to a channel. It doesn't have to
@@ -236,7 +247,7 @@ page. Saving re-plans the schedule, starting after whatever is on now.
 
 ### Marathons
 
-Under **Edit channel → Marathons**, **+ Schedule a marathon** puts one show on back to back. You choose:
+Under **Edit channel → Scheduling → Marathons**, **+ Schedule a marathon** puts one show on back to back. You choose:
 
 - **Which show:** usually a single series. A collection or playlist also works.
 - **Day and start time:** up to 7 days ahead.
@@ -286,7 +297,7 @@ cut or re-encoded.
 - Scanning reads the whole file once, one file at a time, at low priority. Expect roughly a tenth to a third of the
   video's length per file, depending on resolution and your CPU. Ads become available as files finish.
 - Files with chapter marks at each ad use those instead.
-- The channel's **Commercial breaks** card lists every compilation and how many ads were found. **Review** shows one
+- The channel's **Commercials** tab lists every compilation and how many ads were found. **Review** shows one
   picture from the start of each ad. Odd lengths are outlined, because those are usually two ads glued together or
   one ad split in two. **Rescan** scans a file again, and **Don't split** plays a file as one piece (only if it's 10
   minutes or less).
@@ -555,7 +566,7 @@ font (the bundled Maru Gothic if Windows doesn't have one).
 ## Weather channel
 
 Add a channel and set **Type** to **Weather channel**, then save. It's drawn live like the guide channel and rotates
-through these screens (tick the ones you want, in the channel's **Weather channel** card):
+through these screens (tick the ones you want, in the channel's **Weather** tab):
 
 - **Current conditions**: temperature, sky, feels-like, humidity, dew point, wind and gusts, pressure, visibility, UV
   and cloud cover, plus today's high and low and sunrise and sunset.
@@ -569,7 +580,7 @@ through these screens (tick the ones you want, in the channel's **Weather channe
   and pick up bugs, birds, dust and temperature layers. Unfiltered, that shows up as grey-blue static across the map
   and beige rings around each radar site. By default anything below 10 dBZ is left out, which removes the static and
   keeps drizzle and light snow. Lone specks are cleaned up too, and what's left is drawn in the standard NWS colors
-  that match the legend. Change it with **Radar: hide weak echoes** in the channel's **Weather channel** card, from
+  that match the legend. Change it with **Radar: hide weak echoes** in the channel's **Weather** tab, from
   **Show everything** (the raw radar) up to **Below 20 dBZ** (rain only).
 - **Future radar** (US): forecast radar for the next 3 hours, every 30 minutes, from NOAA's HRRR model, clearly
   marked FORECAST. Outside the US this screen is skipped: RainViewer ended its free forecast radar in January 2026.

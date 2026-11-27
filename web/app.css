@@ -60,6 +60,7 @@ input:focus, select:focus { outline: 2px solid var(--blue); border-color: transp
 .chip button:hover { color: var(--red); }
 .editor { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 960px) { .editor { grid-template-columns: 1fr; } }
+.editor.single { grid-template-columns: minmax(0, 980px); }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .preview { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
 .preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -181,3 +182,10 @@ input[type=color] { width: 100%; height: 38px; border: 1px solid var(--line); bo
 .slotrow select.small { padding: 2px 6px; font-size: 13px; max-width: 320px; }
 .slotedit { margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
 .slotrow .live { color: var(--red); }
+
+.tabs { display: flex; gap: 4px; margin: -4px 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs .tab { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-weight: 600;
+  padding: 10px 16px 9px; cursor: pointer; white-space: nowrap; position: relative; }
+.tabs .tab:hover { color: var(--text); }
+.tabs .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .tab.changed::after { content: ""; position: absolute; top: 9px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }

@@ -293,9 +293,12 @@ async function showChannel(id) {
     <button class="btn" id="castbtn">Cast…</button>
     <span class="sub" id="unsaved" style="display:none;color:var(--accent)">Unsaved changes</span>
     <button class="btn primary" id="save">Save</button></div>
+  <div class="tabs" id="chtabs" role="tablist">${(guide ? [["appearance", "🎨 Appearance"], ["content", weather ? "🌤 Weather" : "📺 Guide"]]
+    : [["appearance", "🎨 Appearance"], ["scheduling", "📅 Scheduling"], ["commercials", "📢 Commercials"], ["bumpers", "✨ Bumpers"]])
+    .map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}">${l}</button>`).join("")}</div>
   <div class="editor">
    <div class="stack">
-    <div class="card"><h2>Channel</h2><div class="form">
+    <div class="card" data-tab="appearance"><h2>Channel</h2><div class="form">
       <label class="f">Name<input type="text" id="name" value="${esc(ch.name)}"></label>
       <label class="f">Number<input type="number" id="number" step="0.1" value="${esc(ch.number)}"></label>
       <label class="f">Group (shown in Jellyfin)<input type="text" id="group" value="${esc(ch.group || "")}" placeholder="e.g. Kids"></label>
@@ -309,8 +312,11 @@ async function showChannel(id) {
       <label class="f wide">Theme ${weather ? "(the whole weather channel)" : guide ? "(the whole guide channel)" : "(Up Next / standby cards, Up Next banner, default clock font)"}
         <select id="theme"><option value="">Station theme (${esc(themeName(stationTheme))})</option>
         ${TH.themes.map((t) => `<option value="${t.id}" ${ch.theme === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
-    </div></div>
-    ${weather ? `<div class="card"><h2>🌤 Weather channel</h2><div class="form">
+    </div>
+    <div class="row" style="margin-top:14px;gap:8px"><button class="btn small" id="restart">Restart stream</button>
+      <a class="btn small" href="/api/channels/${ch.id}/log" target="_blank">Log</a><span class="spacer"></span>
+      <button class="btn small danger" id="delete">Delete channel</button></div></div>
+    ${weather ? `<div class="card" data-tab="content"><h2>🌤 Weather channel</h2><div class="form">
       <label class="f">Location<select id="wx_mode">${[["auto", "Automatic (from your internet connection)"], ["zip", "ZIP / postal code"], ["city", "City name"], ["coords", "Exact coordinates"]]
         .map(([v, l]) => `<option value="${v}" ${(WXL.mode || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="f wxm" data-m="zip">ZIP / postal code<input type="text" id="wx_zip" value="${esc(WXL.zip || "")}" placeholder="62701"></label>
@@ -338,7 +344,7 @@ async function showChannel(id) {
       <label class="f">Big numbers &amp; headings font<select id="guide_display_font">${fontOptions(ch.guide_display_font, chTheme().fonts.guide_display)}</select></label>
       <div class="fontsample wide" id="guide_sample">72° Partly Cloudy · High 75° · Low 58°</div>
     </div><p class="sub">Forecasts from Open-Meteo, alerts from the US National Weather Service, radar from RainViewer, maps © OpenStreetMap contributors / CARTO.
-      Free for personal use, no accounts or keys. The channel keeps showing the last good forecast if the internet drops.</p></div>` : guide ? `<div class="card"><h2>Guide channel</h2><div class="form">
+      Free for personal use, no accounts or keys. The channel keeps showing the last good forecast if the internet drops.</p></div>` : guide ? `<div class="card" data-tab="content"><h2>Guide channel</h2><div class="form">
       <label class="f wide">Background music (file or folder on the Broadcast server)<input type="text" id="music_path" value="${esc(ch.music_path || "")}" placeholder="D:\\Music\\Smooth Jazz"></label>
       <label class="f">Scroll speed<input type="range" id="guide_scroll_speed" min="10" max="120" value="${ch.guide_scroll_speed || 40}"></label>
       <label class="f">Clock format<select id="guide_clock_fmt">${Object.entries(TH.clock_formats).map(([k, v]) => `<option value="${k}" ${(clock.format || "12h") === k ? "selected" : ""}>${{"12h": "12-hour", "12h_plain": "12-hour, no AM/PM", "12h_sec": "12-hour with seconds", "24h": "24-hour", "24h_sec": "24-hour with seconds"}[k]} (${v})</option>`).join("")}</select></label>
@@ -346,7 +352,7 @@ async function showChannel(id) {
       <label class="f">Clock &amp; channel numbers font<select id="guide_display_font">${fontOptions(ch.guide_display_font, chTheme().fonts.guide_display)}</select></label>
       <div class="fontsample wide" id="guide_sample">Tokyo Night Drive · となりのアニメ</div>
     </div><p class="sub">The guide lists every regular channel that's on the air, with a spotlight on what's playing now.</p></div>` : `
-    <div class="card"><h2>Programming</h2><div class="form">
+    <div class="card" data-tab="scheduling"><h2>Programming</h2><div class="form">
       ${sourcePicker("src", "What plays on this channel", "Mix and match libraries, genres, collections, single shows, playlists, tags or studios/networks.")}
       ${sourcePicker("exc", "Never play", "Optional: anything matching these is removed (e.g. exclude the Horror genre from a kids channel).")}
       <div class="wide"><h3>Item types</h3><div class="row">${["Movie", "Episode", "MusicVideo", "Video"].map((t) =>
@@ -364,30 +370,19 @@ async function showChannel(id) {
       ${sourcePicker("fil", "Filler for the gaps", "When shows start on the hour/half hour, gaps are filled with these (commercials, music videos, shorts ≤ 15 min). Anything left over shows an “Up Next” card.")}
       <label class="f wide">Music under “Up Next” cards (file or folder on the Broadcast server, optional)<input type="text" id="music_path" value="${esc(ch.music_path || "")}"></label>
     </div></div>
-    <div class="card" id="slotcard"><h2>📅 Time slots</h2>
+    <div class="card" data-tab="scheduling" id="slotcard"><h2>📅 Time slots</h2>
       <p class="sub" style="margin-top:0">Shows, movies or collections that air at set times, like “The Simpsons, Mon–Fri 8–9 PM” or
         “a movie every Friday at 8”. Regular programming fills the rest of the day. Changes apply when you save.</p>
       <div id="slotlist"></div>
       <div id="sloted" class="slotedit" style="display:none"></div>
       <div class="row" style="margin-top:8px"><button class="btn" id="slot_add">+ Add a time slot</button></div></div>
-    <div class="card" id="maracard"><h2>🏃 Marathons</h2>
+    <div class="card" data-tab="scheduling" id="maracard"><h2>🏃 Marathons</h2>
       <p class="sub" style="margin-top:0">One show back to back, for 1 to 24 hours. Schedule one up to 7 days ahead. While it's on it takes over
         the channel, including any time slots. Changes apply when you save.</p>
       <div id="maralist"></div>
       <div id="maraed" class="slotedit" style="display:none"></div>
       <div class="row" style="margin-top:8px"><button class="btn" id="mara_add">+ Schedule a marathon</button></div></div>
-    <div class="card" id="poolcard"><h2>📊 What's on this channel</h2>
-      <div class="row"><div class="seg" id="pool_mode">${[["items", "Items"], ["hours", "Hours"], ["plan", "Airtime goal"], ["sched", "Scheduled"]]
-        .map(([k, l]) => `<button class="btn small" data-pm="${k}">${l}</button>`).join("")}</div><span class="spacer"></span><span class="sub" id="pool_total">Loading…</span></div>
-      <div class="poolwrap"><svg id="pool_pie" viewBox="-110 -110 220 220" aria-label="Pool breakdown"></svg><div id="pool_legend"></div></div>
-      <h3>Balance the airtime</h3>
-      <p class="sub" style="margin-top:0">Off by default: every episode and movie gets its turn, so a show with 300 episodes airs far more than one with 10.
-        Slide right to even things out, or give single shows more or less time with their own sliders. Saving rebuilds the schedule after what's on now.</p>
-      <div class="form"><label class="f wide">Even out the shows: <b id="bal_val"></b>
-        <input type="range" id="bal_strength" min="0" max="100" step="5" value="${+((ch.balance || {}).strength) || 0}">
-        <span class="row sub" style="justify-content:space-between"><span>Off (as the pool is)</span><span>Equal time for every show</span></span></label></div>
-      <div class="row"><button class="btn small" id="bal_reset">Reset balancing</button><span class="sub" id="bal_note"></span></div></div>
-    <div class="card"><h2>Subtitles</h2>
+    <div class="card" data-tab="appearance"><h2>Subtitles</h2>
       <div class="form">
         <label class="f wide">Show subtitles<select id="sub_mode">${[["off", "Off"], ["always", "Always, when the show has them"],
           ["foreign", "Only when the audio isn't in my language (e.g. Japanese audio → English subtitles)"],
@@ -405,7 +400,7 @@ async function showChannel(id) {
       <p class="sub">Subtitles are drawn into the picture, so they show on every TV, browser and Chromecast. Text subtitles (SRT, ASS) and
         Blu-ray/DVD picture subtitles both work; styled anime (ASS) subtitles keep their own fonts and colours. Japanese, Chinese and Korean
         subtitles automatically use a font that has those characters.</p></div>
-    <div class="card"><h2>Commercial breaks</h2>
+    <div class="card" data-tab="commercials"><h2>Commercial breaks</h2>
       <label class="check"><input type="checkbox" id="br_on" ${br.enabled ? "checked" : ""}> Interrupt shows with commercial breaks, then pick up right where they left off</label>
       <div class="form" style="margin-top:12px">
         ${sourcePicker("brk", "Commercials come from", "Make a library in Jellyfin (e.g. “Commercials”, Home Videos type) full of short clips and pick it here.")}
@@ -423,7 +418,7 @@ async function showChannel(id) {
         <div class="wide" id="br_comp"></div>
       </div>
       <p class="sub">Breaks are filled with whole commercials up to the length you set. The guide still lists each show as one block, like real TV.</p></div>
-    <div class="card"><h2>Bumpers</h2>
+    <div class="card" data-tab="bumpers"><h2>Bumpers</h2>
       <label class="check"><input type="checkbox" id="bu_on" ${bu.enabled ? "checked" : ""}> Play bumpers</label>
       <div class="row" style="margin-top:10px">
         <label class="check"><input type="checkbox" id="bu_into" ${bu.into_break !== false ? "checked" : ""}> Going into a break</label>
@@ -435,18 +430,27 @@ async function showChannel(id) {
       <div class="row" id="bu_list" style="max-height:240px;overflow:auto"><span class="sub">Loading…</span></div>
       <p class="sub">None ticked = use all of them. “Going into a break” only applies when commercial breaks are on.</p>
       <div class="form">${sourcePicker("bmp", "Video bumpers from Jellyfin (optional)", "Short clips (under 5 minutes) mixed in with the text bumpers at any spot.")}</div></div>`}
-    <div class="card"><h2>Schedule</h2><div class="row" style="margin-bottom:10px">
+   </div>
+   <div class="stack">
+    ${guide ? "" : `<div class="card" data-tab="scheduling"><h2>Schedule</h2><div class="row" style="margin-bottom:10px">
       <span class="sub" id="poolinfo"></span><span class="spacer"></span>
       ${guide ? "" : `<button class="btn small" id="skip" title="Stop what's playing and move on. A show is skipped entirely; an ad or bumper just that one.">⏭ Skip what's on</button>
       <button class="btn small" id="rebuild" title="Re-read the library and reshuffle everything after what is on now">Rebuild schedule</button>
       <button class="btn small" id="rebuild_now" title="Re-read the library and start a fresh schedule right now, replacing what's on too">Rebuild including now</button>`}
-      <button class="btn small" id="restart">Restart stream</button>
-      <a class="btn small" href="/api/channels/${ch.id}/log" target="_blank">Log</a>
-      <button class="btn small danger" id="delete">Delete channel</button></div>
-      <div class="sched" id="sched"><p class="sub">${guide ? `The ${weather ? "weather" : "guide"} channel has no schedule of its own.` : "Loading…"}</p></div></div>
-   </div>
-   <div class="stack">
-    <div class="card"><h2>On-screen graphics</h2>
+</div>
+      <div class="sched" id="sched"><p class="sub">${guide ? `The ${weather ? "weather" : "guide"} channel has no schedule of its own.` : "Loading…"}</p></div></div>`}
+    ${guide ? "" : `<div class="card" data-tab="scheduling" id="poolcard"><h2>📊 What's on this channel</h2>
+      <div class="row"><div class="seg" id="pool_mode">${[["items", "Items"], ["hours", "Hours"], ["plan", "Airtime goal"], ["sched", "Scheduled"]]
+        .map(([k, l]) => `<button class="btn small" data-pm="${k}">${l}</button>`).join("")}</div><span class="spacer"></span><span class="sub" id="pool_total">Loading…</span></div>
+      <div class="poolwrap"><svg id="pool_pie" viewBox="-110 -110 220 220" aria-label="Pool breakdown"></svg><div id="pool_legend"></div></div>
+      <h3>Balance the airtime</h3>
+      <p class="sub" style="margin-top:0">Off by default: every episode and movie gets its turn, so a show with 300 episodes airs far more than one with 10.
+        Slide right to even things out, or give single shows more or less time with their own sliders. Saving rebuilds the schedule after what's on now.</p>
+      <div class="form"><label class="f wide">Even out the shows: <b id="bal_val"></b>
+        <input type="range" id="bal_strength" min="0" max="100" step="5" value="${+((ch.balance || {}).strength) || 0}">
+        <span class="row sub" style="justify-content:space-between"><span>Off (as the pool is)</span><span>Equal time for every show</span></span></label></div>
+      <div class="row"><button class="btn small" id="bal_reset">Reset balancing</button><span class="sub" id="bal_note"></span></div></div>`}
+    <div class="card" data-tab="appearance"><h2>On-screen graphics</h2>
       <div class="preview" id="pv"><div class="hint">Click “Preview” to render a frame with your logo and clock.</div></div>
       <div class="row" style="margin-top:10px"><button class="btn small" id="preview">Preview</button>${weather ? `<select id="pv_slide">${WX_SLIDES.map(([k, l]) => `<option value="${k}">${l.replace(/ \(.*/, "")}</option>`).join("")}</select>` : ""}<span class="sub">Save first to preview changes.</span></div>
       ${guide ? `
@@ -508,6 +512,7 @@ async function showChannel(id) {
 
   let dirty = false;
   function markDirty() {
+    $("#chtabs .tab.active")?.classList.add("changed");     // a dot on the tab with unsaved changes
     if (dirty) return;
     dirty = true;
     $("#save").textContent = "Save changes";
@@ -517,8 +522,25 @@ async function showChannel(id) {
   const pickerBits = /-(q|list|type)$/;
   ["input", "change"].forEach((ev) => $(".editor").addEventListener(ev, (e) => {
     if (e.target.matches("input, select, textarea") && !pickerBits.test(e.target.id || "") && !e.target.closest("[data-nodirty]") &&
-      !["logofile", "hlfile", "pv_slide"].includes(e.target.id)) markDirty();
+      !["logofile", "hlfile", "pv_slide"].includes(e.target.id)) {
+      markDirty();
+    }
   }));
+  // ---- tabs
+  const TABS = $$("#chtabs .tab").map((b) => b.dataset.tab);
+  const showTab = (t) => {
+    if (!TABS.includes(t)) t = TABS[0];
+    $$("#chtabs .tab").forEach((b) => { b.classList.toggle("active", b.dataset.tab === t); b.setAttribute("aria-selected", String(b.dataset.tab === t)); });
+    $$(".editor > .stack > .card[data-tab]").forEach((c) => (c.style.display = c.dataset.tab === t ? "" : "none"));
+    const stacks = $$(".editor > .stack");
+    stacks.forEach((st) => (st.style.display = [...st.children].some((c) => c.style.display !== "none") ? "" : "none"));
+    $(".editor").classList.toggle("single", stacks.filter((x) => x.style.display !== "none").length < 2);
+    try { sessionStorage.setItem("jfb-chtab", t); } catch { /* private mode */ }
+  };
+  $$("#chtabs .tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+  let firstTab = "appearance";
+  try { firstTab = sessionStorage.getItem("jfb-chtab") || firstTab; } catch { /* private mode */ }
+  showTab(firstTab);
   $$(".corners button").forEach((x) => x.addEventListener("click", markDirty));
   leaveGuard = (silent) => !dirty || (!silent && confirm("This channel has unsaved changes. Leave without saving?"));
   if (!guide) {
@@ -585,6 +607,7 @@ async function showChannel(id) {
     const typeChanged = d.type !== ch.type;
     await api("PUT", "channels/" + ch.id, d);
     dirty = false;
+    $$("#chtabs .tab.changed").forEach((b) => b.classList.remove("changed"));
     $("#save").textContent = "Save"; $("#save").classList.remove("dirty"); $("#unsaved").style.display = "none";
     $("h1").textContent = `${d.number} · ${d.name}`;
     if (!quiet) toast(d.sources && d.sources.length ? "Saved — building the schedule now" : "Saved");
