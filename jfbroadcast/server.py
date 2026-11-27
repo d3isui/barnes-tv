@@ -922,10 +922,15 @@ class Handler(BaseHTTPRequestHandler):
         loc, err = app.weather.location(ch, wait=True)
         if not loc:
             return {"ok": False, "error": err or "Couldn't find the location"}
-        snap = app.weather.snapshot(ch, wait=True)
+        snap = app.weather.snapshot(ch, wait=True, refresh=True)     # fetch the forecast now, to show any error
         fc = snap.get("forecast")
         out = {"ok": bool(fc), "location": loc, "imperial": snap.get("imperial"),
                "errors": {k: v for k, v in (snap.get("errors") or {}).items() if v}, "alerts": len(snap.get("alerts") or [])}
+        if fc:
+            out["forecast_age_min"] = round((time.time() - fc.get("fetched", 0)) / 60)
+        rd = (snap.get("radar") or {}).get("local") or {}
+        if rd.get("frames"):
+            out["radar_age_min"] = round((time.time() - rd["frames"][-1][0]) / 60)
         if fc:
             from .weather import describe
             cur = fc["current"]

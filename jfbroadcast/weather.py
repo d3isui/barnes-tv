@@ -499,7 +499,7 @@ class WeatherService:
                     self.busy.discard(name)
         threading.Thread(target=run, daemon=True, name="weather-" + name[:20]).start()
 
-    def snapshot(self, ch, map_size=(1200, 520), light=False, wait=False, radar=True):
+    def snapshot(self, ch, map_size=(1200, 520), light=False, wait=False, radar=True, refresh=False):
         """Everything the weather channel needs right now (fetching what's stale in the background)."""
         cfg = self._cfg(ch)
         loc, loc_err = self.location(ch, wait=wait)
@@ -525,8 +525,8 @@ class WeatherService:
                 (self.cache / f"fc-{k.replace(',', '_')}.json").write_text(json.dumps(fc))
                 st["forecast"], st["errors"]["forecast"] = fc, ""
             except Exception as e:
-                st["errors"]["forecast"] = str(e)
-                log.warning("weather forecast failed: %s", e)
+                st["errors"]["forecast"] = f"{type(e).__name__}: {e}"
+                log.warning("weather forecast failed (%s): %s: %s", URLS["forecast"], type(e).__name__, e)
             st["at"]["forecast"] = time.time()
 
         def get_alerts():
@@ -603,7 +603,7 @@ class WeatherService:
             # a failed refresh tries again soon instead of waiting the full interval
             st["at"]["radar"] = time.time() if ok else time.time() - RADAR_EVERY + RADAR_RETRY
 
-        if wait and st.get("forecast") is None:
+        if (wait and st.get("forecast") is None) or refresh:     # refresh: fetch right now (admin "Check")
             get_forecast()
         if now - st["at"].get("forecast", 0) > (FORECAST_EVERY if st.get("forecast") else 90):
             st["at"]["forecast"] = now

@@ -237,7 +237,7 @@ public class MainActivity extends Activity {
             String body = out.toString("UTF-8");
             if (!body.contains("barnes-tv")) return null;
             Matcher m = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]*)\"").matcher(body);
-            return m.find() ? m.group(1) : brand();
+            return m.find() ? m.group(1) : appName;
         } catch (Exception e) {
             return null;
         } finally {
@@ -413,12 +413,15 @@ public class MainActivity extends Activity {
     }
 
     /** The app's name as installed (set by the branding kit when the app is built). */
+    static String appName = "Barnes TV";
+
     String brand() {
         try {
-            return getApplicationInfo().loadLabel(getPackageManager()).toString();
+            appName = getApplicationInfo().loadLabel(getPackageManager()).toString();
         } catch (Exception e) {
-            return "Barnes TV";
+            // keep the last known name
         }
+        return appName;
     }
 
     void js(String code) {

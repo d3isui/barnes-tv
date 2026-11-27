@@ -633,6 +633,8 @@ loadStatus();
         const L = r.location;
         $("#wx_result").innerHTML = `📍 <b>${esc(L.name)}${L.region ? ", " + esc(L.region) : ""}</b> ${esc(L.country || "")} (${L.lat.toFixed(2)}, ${L.lon.toFixed(2)}, from ${esc(L.source)})` +
           (r.now ? ` · now <b>${esc(r.now)}</b>` : "") + (r.alerts ? ` · ⚠ ${r.alerts} alert(s)` : "") +
+          (r.forecast_age_min !== undefined ? ` · forecast ${r.forecast_age_min < 2 ? "just updated" : r.forecast_age_min + " min old"}` : "") +
+          (r.radar_age_min !== undefined ? ` · newest radar ${r.radar_age_min} min old` : "") +
           (Object.keys(r.errors || {}).length ? `<br>⚠ ${esc(Object.entries(r.errors).map(([k, v]) => k + ": " + v).join(" · "))}` : "");
       } catch (e) { $("#wx_result").textContent = "❌ " + e.message; }
     };

@@ -1,6 +1,7 @@
 """Draws the Weather channel: themed screens (current conditions, next hours, 7 days, radar, sun & moon,
 alerts), weather icons, charts and the frame around them. One frame a second, like the guide channel."""
 import math
+import time
 from datetime import datetime, timezone
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -288,10 +289,14 @@ class WeatherRenderer:
         name = loc["name"] + (f", {loc['region']}" if loc.get("region") and loc["region"] != loc["name"] else "")
         name = self.F.text(name, True)
         td.text((x0 + 26 * s, y0 + 30 * s), self._case(name), font=self.D.get(28 * s, True, name), fill=c["accent"], anchor="lm")
+        ink = c["muted"]
         if right is None and fc:
             right = "Updated " + fmt_time(fc["fetched"], self.clock_fmt) + "  ·  Weather data by Open-Meteo.com"
+            if time.time() - fc["fetched"] > 3600:          # say so when the forecast can't be refreshed
+                right = "Forecast delayed: last updated " + fmt_time(fc["fetched"], self.clock_fmt) + "  ·  Open-Meteo.com"
+                ink = (230, 150, 20) if self.T.light else (255, 196, 80)
         if right:
-            td.text((x1 - 26 * s, y0 + 30 * s), right, font=self.F.get(17 * s, False, right), fill=c["muted"], anchor="rm")
+            td.text((x1 - 26 * s, y0 + 30 * s), right, font=self.F.get(17 * s, False, right), fill=ink, anchor="rm")
 
     def _nodata(self, img, td, snap):
         s, c = self.s, self.T.c
