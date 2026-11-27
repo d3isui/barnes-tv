@@ -5,7 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import __version__, branding
+from . import net, __version__, branding
 
 
 def _safe(text):
@@ -43,7 +43,7 @@ class Jellyfin:
         req = urllib.request.Request(url, method=method, headers={
             "Authorization": self.auth_header, "Accept": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with net.urlopen(req, timeout=self.timeout) as r:
                 body = r.read()
                 return json.loads(body) if body else None
         except urllib.error.HTTPError as e:
@@ -192,7 +192,7 @@ class Jellyfin:
 
     def fetch_bytes(self, url, timeout=15):
         req = urllib.request.Request(url, headers={"Authorization": self.auth_header})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with net.urlopen(req, timeout=timeout) as r:
             return r.read()
 
 

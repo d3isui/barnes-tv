@@ -401,6 +401,10 @@ viewer tunes in ──► session: one ffmpeg per program (seeks to the right sp
 ## Troubleshooting
 
 - **"ffmpeg not found"**: set the path in Settings, for example `C:\Program Files\Jellyfin\Server\ffmpeg.exe`.
+- **"certificate verify failed" / "certificate has expired"** (weather, maps): Python's list of trusted certificates
+  is out of step with Windows'. This happens most when the server runs from the startup task. The app checks
+  certificates the way Windows does (the `truststore` package) and falls back to Mozilla's list (`certifi`). Both are
+  installed by `start.bat`, and by `install-windows-startup.ps1` each time you run it.
 - **Jellyfin can't load the M3U or the guide**: from the Jellyfin machine, check that
   `http://<broadcast-server>:8420/iptv/channels.m3u` opens in a browser. If it doesn't, check the firewall and the
   "Address Jellyfin uses" setting.

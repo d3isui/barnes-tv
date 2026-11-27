@@ -24,6 +24,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from . import net
+
 log = logging.getLogger("weather")
 
 UA = "BarnesTV/1.14 (personal weather channel; https://github.com/d3isui/barnes-tv)"
@@ -98,13 +100,13 @@ def moon(t=None):
 
 def http_json(url, timeout=15):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json, application/geo+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with net.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
 def http_bytes(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with net.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 

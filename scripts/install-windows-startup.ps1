@@ -32,6 +32,13 @@ if (-not (Test-Path $Py)) {
     & (Join-Path $Root ".venv\Scripts\python.exe") -m pip install -q -r (Join-Path $Root "requirements.txt")
 }
 
+# stop a running copy, then bring the Python packages up to date (the startup task doesn't do this itself)
+Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Write-Host "Installing / updating Python packages..."
+& (Join-Path $Root ".venv\Scripts\python.exe") -m pip install --disable-pip-version-check -q -r (Join-Path $Root "requirements.txt")
+if ($LASTEXITCODE -ne 0) { Write-Host "Some packages couldn't be installed (check your internet connection); continuing." -ForegroundColor Yellow }
+
 Unregister-ScheduledTask -TaskName $OldName -Confirm:$false -ErrorAction SilentlyContinue
 $action = New-ScheduledTaskAction -Execute $Py -Argument "`"$Root\broadcast.py`" --port $Port" -WorkingDirectory $Root
 $trigger = New-ScheduledTaskTrigger -AtStartup
