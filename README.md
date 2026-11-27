@@ -130,7 +130,9 @@ from Jellyfin over HTTP, so it works from any machine that can reach Jellyfin.
    earlier "allow this app?" prompt, because those override every allow rule. At the end it prints the addresses to
    use from your other devices. If you skip this step, Windows Firewall will ask the first time instead.
 
-   The task starts at boot, before anyone signs in, and restarts the server if it ever quits. After installing it,
+   The task starts at boot, before anyone signs in, and restarts the server if it ever quits. To stop it by hand, use
+   **End** on the "Barnes TV Broadcast" task in Task Scheduler: that stops the server and all its ffmpeg processes.
+   **Run** starts it again. After installing it,
    close any `start.bat` window, because only one copy can use port 8420. To ride out power cuts, also set the PC's
    BIOS/UEFI option **Restore on AC power loss** (also called *After power failure* or *AC back*) to **Power On**,
    and set Windows **Sleep** to **Never**. Add `-Check` to see whether the server is running and how the firewall is
