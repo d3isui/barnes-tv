@@ -126,24 +126,24 @@ function drawNoise() {
 
 // ---------------------------------------------------------------- tuning
 let prevIdx = null;
-function tune(i) {
+function tune(i, retry) {
   if (!channels.length) return;
+  if (!retry) retryCount = 0;
   const next = (i + channels.length) % channels.length;
   if (next !== idx) prevIdx = idx;
   idx = next;
   const ch = channels[idx];
   if (!REMOTE_ONLY) location.replace("#" + encodeURIComponent(ch.number));
   store.set("jfb-last", ch.number);
-  showOSD(String(ch.number));
+  if (!retry) showOSD(String(ch.number));
   armSleep();
   if (isBlocked(ch)) return showLock(ch);
   hideLock();
   if (castDev) return castTune(ch);
   if (REMOTE_ONLY) return openCastPicker();
-  showBanner();
+  if (!retry) { showBanner(); $("#msg").style.display = "none"; }
   noise(true);
-  $("#msg").style.display = "none";
-  clearTimeout(retryTimer);
+  clearTimeout(retryTimer); retryPending = false;
   if (player) { try { player.destroy(); } catch { } player = null; }
   if (!window.mpegts || !mpegts.getFeatureList().mseLivePlayback) {
     noise(false);
@@ -160,14 +160,45 @@ function tune(i) {
       fetch("/api/client-log", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel: ch.number, type, detail, info: info && (info.msg || JSON.stringify(info)) }) });
     } catch { }
-    noise(true);
-    retryTimer = setTimeout(() => { if (channels[idx] === ch && !castDev) tune(idx); }, 2500);
+    reconnect("player error: " + detail);
   });
+  // a live channel never "finishes": the stream ending means the server went away (restart, update, network)
+  player.on(mpegts.Events.LOADING_COMPLETE, () => reconnect("stream ended"));
+  progressAt = Date.now(); progressT = -1;
   player.load();
   const p = player.play();
   if (p && p.catch) p.catch(() => { });
 }
-video.addEventListener("playing", () => { noise(false); watchPicture(); });
+video.addEventListener("playing", () => {
+  noise(false); watchPicture();
+  if (retryCount) { clog("reconnected", `after ${retryCount} tries`); retryCount = 0; $("#msg").style.display = "none"; }
+});
+// ---- reconnecting: when the server restarts or the network drops, keep trying (2, 4, 8, then every 15 seconds)
+let retryCount = 0, progressAt = 0, progressT = -1, retryPending = false;
+function reconnect(why) {
+  if (castDev || REMOTE_ONLY || !on || !player) return;
+  clearTimeout(retryTimer);
+  const ch = channels[idx], id = ch && ch.id;
+  if (!retryCount) clog("reconnecting", why);
+  const delay = Math.min(15000, 2000 * 2 ** Math.min(retryCount, 3));
+  retryCount++;
+  noise(true);
+  if (retryCount >= 2) { $("#msg").textContent = "Reconnecting to the server…"; $("#msg").style.display = "block"; }
+  retryPending = true;
+  retryTimer = setTimeout(() => {
+    retryPending = false;
+    if (channels[idx] && channels[idx].id === id && !castDev) {
+      loadChannels().catch(() => { }).finally(() => tune(idx, true));
+    }
+  }, delay);
+}
+// the picture stopped moving for a while (server gone without a clean goodbye, or a stuck connection): reconnect
+setInterval(() => {
+  if (!on || castDev || REMOTE_ONLY || !player || document.hidden || retryPending) return;
+  const t = video.currentTime;
+  if (t !== progressT) { progressT = t; progressAt = Date.now(); return; }
+  if (Date.now() - progressAt > 12000) { progressAt = Date.now(); reconnect("picture stalled"); }
+}, 2000);
 // Android TV's WebView sometimes plays the sound but leaves the picture black until something redraws the screen
 // (opening and closing the guide "fixed" it). Check that frames really reach the screen; if not, force a redraw,
 // and if that doesn't help, tune in again.
@@ -188,7 +219,7 @@ function watchPicture() {
   if (APP) repaint();                       // cheap insurance on the TV app: one redraw as the picture starts
   const t0 = video.currentTime, f0 = frameCount();
   picWatch = setTimeout(() => {
-    if (channels[idx] !== ch || dark || video.paused) return;
+    if (!channels[idx] || channels[idx].id !== ch.id || dark || video.paused) return;
     const moved = video.currentTime - t0, f1 = frameCount();
     const noPicture = video.videoWidth === 0 || (f1 !== null && f0 !== null && f1 - f0 < 5 && moved > 2);
     if (!noPicture) return;
@@ -200,6 +231,7 @@ function watchPicture() {
 }
 video.addEventListener("waiting", () => { if (video.currentTime < 1) noise(true); });
 function stopLocal() {
+  clearTimeout(retryTimer); retryPending = false;
   if (player) { try { player.destroy(); } catch { } player = null; }
   noise(false);
 }

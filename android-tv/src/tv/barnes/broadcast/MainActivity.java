@@ -20,6 +20,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
+import android.graphics.Bitmap;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -355,7 +356,12 @@ public class MainActivity extends Activity {
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.addJavascriptInterface(new Bridge(), "BarnesApp");
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public Bitmap getDefaultVideoPoster() {     // no grey "play" placeholder while a channel loads
+                return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {

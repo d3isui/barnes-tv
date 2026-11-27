@@ -205,7 +205,8 @@
   <link rel="stylesheet" href="/theme.css">
 </head>
 <body class="mode-%%MODE%%">
-  <video id="v" playsinline></video>
+  <!-- the empty poster stops Android's web view drawing its grey "play" / broken-image placeholder while a channel loads -->
+  <video id="v" playsinline poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
   <canvas id="noise" width="320" height="180"></canvas>
   <div id="osd"></div>
   <div id="msg"></div>

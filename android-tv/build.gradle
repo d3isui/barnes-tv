@@ -12,8 +12,8 @@ android {
         applicationId "tv.barnes.broadcast"
         minSdk 21
         targetSdk 35          // current Android: no "built for an older version of Android" warning
-        versionCode 2
-        versionName "1.1"
+        versionCode 3
+        versionName "1.2"
     }
 
     sourceSets {
