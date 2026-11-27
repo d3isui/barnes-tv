@@ -326,6 +326,9 @@ async function showChannel(id) {
         `<label class="check"><input type="checkbox" data-wxslide="${k}" ${(WX.slides || WX_SLIDES.map((x) => x[0])).includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div></div>
       <label class="f">Seconds per screen<input type="number" id="wx_secs" min="5" max="60" value="${WX.slide_seconds || 10}"></label>
       <label class="f">Radar loop length<select id="wx_frames">${[3, 6, 9, 12].map((n) => `<option value="${n}" ${(WX.radar_frames || 6) === n ? "selected" : ""}>${n * 10} minutes</option>`).join("")}</select></label>
+      <label class="f">Radar: hide weak echoes (US)<select id="wx_mindbz">${[["all", "Show everything (raw, incl. clear-air static)"], [5, "Below 5 dBZ"],
+        [10, "Below 10 dBZ (recommended)"], [15, "Below 15 dBZ"], [20, "Below 20 dBZ (rain only)"]].map(([v, l]) =>
+        `<option value="${v}" ${String(WX.radar_min_dbz ?? 10) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="check"><input type="checkbox" id="wx_alerts" ${WX.alerts !== false ? "checked" : ""}> Severe weather alerts (US)</label>
       <label class="check"><input type="checkbox" id="wx_crawl" ${WX.crawl !== false ? "checked" : ""}> Scrolling crawl along the bottom</label>
       <label class="f">Crawl speed<input type="range" id="wx_speed" min="40" max="250" value="${WX.crawl_speed || 110}"></label>
@@ -530,6 +533,7 @@ async function showChannel(id) {
           name: $("#wx_name").value.trim() },
         units: $("#wx_units").value, slides: $$("[data-wxslide]").filter((x) => x.checked).map((x) => x.dataset.wxslide),
         slide_seconds: Math.max(5, +$("#wx_secs").value || 10), radar_frames: +$("#wx_frames").value, alerts: $("#wx_alerts").checked,
+        radar_min_dbz: $("#wx_mindbz").value === "all" ? "all" : +$("#wx_mindbz").value,
         crawl: $("#wx_crawl").checked, crawl_speed: +$("#wx_speed").value };
       d.clock = { ...clock, format: $("#guide_clock_fmt").value };
       d.theme = $("#theme").value; d.guide_font = $("#guide_font").value; d.guide_display_font = $("#guide_display_font").value;

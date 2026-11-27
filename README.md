@@ -507,6 +507,13 @@ through these screens (tick the ones you want, in the channel's **Weather channe
 - **Local and regional radar**: the last hour of radar looping over a street map, with your location marked. If the
   newest radar picture is more than 40 minutes old, a "Radar delayed" notice says so. Pictures over 3 hours old are
   never shown.
+
+  In the US, weak echoes are hidden. Most nights, and on calm days, the radars run in a sensitive "clear-air" mode
+  and pick up bugs, birds, dust and temperature layers. Unfiltered, that shows up as grey-blue static across the map
+  and beige rings around each radar site. By default anything below 10 dBZ is left out, which removes the static and
+  keeps drizzle and light snow. Lone specks are cleaned up too, and what's left is drawn in the standard NWS colors
+  that match the legend. Change it with **Radar: hide weak echoes** in the channel's **Weather channel** card, from
+  **Show everything** (the raw radar) up to **Below 20 dBZ** (rain only).
 - **Future radar** (US): forecast radar for the next 3 hours, every 30 minutes, from NOAA's HRRR model, clearly
   marked FORECAST. Outside the US this screen is skipped: RainViewer ended its free forecast radar in January 2026.
 - **Sun & moon**: sunrise, sunset and daylight for today and tomorrow, peak UV, and the moon's phase.

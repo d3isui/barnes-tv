@@ -141,6 +141,7 @@ CHANNEL_DEFAULT = {
         "slides_version": 2,           # 2 = knows about the future radar screen
         "slide_seconds": 10,
         "radar_frames": 6,
+        "radar_min_dbz": 10,           # hide radar echoes weaker than this (clear-air static, bugs, birds); "all" = raw
         "radar_zoom_local": 7,
         "radar_zoom_regional": 5,
         "radar_zoom_future": 6,

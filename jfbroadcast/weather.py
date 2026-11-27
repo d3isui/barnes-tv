@@ -22,7 +22,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from . import net
 
@@ -264,6 +264,72 @@ def world_px(lat, lon, z):
     return x, y
 
 
+# ---- cleaning up NEXRAD / HRRR radar images
+# The IEM mosaic (N0Q) and HRRR tiles share one 256-colour palette, where colour number i means (i - 1) / 2 - 32 dBZ.
+# It reaches all the way down to -32 dBZ: in "clear-air mode" (most nights, and calm days) the radars pick up bugs,
+# birds, dust and temperature layers, which show up as grey-blue static and beige rings around every radar site. TV
+# stations hide those weak echoes. So each tile is decoded back to dBZ, echoes below the channel's threshold are
+# dropped, lone specks are cleaned away, and what's left is drawn in the classic NWS colours shown in the legend.
+# Palette from the Iowa Environmental Mesonet (github.com/akrherz/iem, data/gis/images/n0q-ramp.png, MIT licence).
+IEM_PALETTE = bytes.fromhex(
+    "00000085718f85718f86738d87758b87758b8877898979878979878a7b858b7d848b7d848c7f828d81808d81808e837e8f857c8f857c9087"
+    "7b918979918979928b77938d759691539894579b975b9d9a60a09d64a3a068a5a36da8a671aaa976adac7ab0af7eb2b283b7b88cbabb90bd"
+    "be94bfc199c2c49dc4c7a2c7caa6cacdaaccd0afd2d4b4cfd2b4c9ccb4c6c9b4c3c7b4c0c4b4bdc1b4b9beb4b6bbb4b3b9b4b0b6b4adb3b4"
+    "aab0b4a4abb4a0a8b49da5b49aa2b497a0b4949db4919ab4949bb59098b48c95b38892b2808cb07c89af7886ae7483ac7080ab6c7daa6779"
+    "a96376a85f73a75b70a6576da44f67a24b64a14761a0435e9f415b9e4361a24568a6486faa4a76ae4d7db24f84b6518bbb5699c3599fc75b"
+    "a6cb5eadcf60b4d462bbd865c2dc67c9e06ad0e46fd6e868d6d759d6b352d6a24bd69043d67e3cd66d35d65b11d51811d11710cd1710c816"
+    "10c4160fbc150fb7140eb3140eaf130eab130da6120da2120d9e110c99110c95100c91100b880f0b840e0a800e0a7c0d0a770d09730c096f"
+    "0c096b0b08660b08620a095e09327308467d085b88076f9207849d0698a806adb205c1bd05d6c704ead204ffe200ffd800ffd300ffce00ff"
+    "c900ffc400ffc000ffbb00ffb600ffb100ffac00ffa700ffa200ff9900ff9400ff8f00ff8a00ff8500ff8000ff0000f80000f10000ea0000"
+    "e30000d50000cd0000c60000bf0000b80000b10000aa0000a300009b00009400008d00007f0000780000710000fffffffff5ffffeaffffdf"
+    "ffffd4ffffc9ffffbeffffb3ffff9dffff92ffff75fffc6bfdf960faf656f7f34bf4f040f1ed36efea2bece720e9e10be3b200ffac00fca4"
+    "00f79b00f49300ef8800ea8300e87900e27200dd6900db05ecf005ecf005ecf005dde005dde005dde005cdd005cdd004bdc004bdc004bdc0"
+    "04aeb004aeb0049ea0049ea0049ea0038e90038e90038e90037e80037e80036f70036f70036f70025f60025f60024f50024f50024f50023f"
+    "40023f40023f400130300130300120200120200120203a67b53a67b53a67b53a67b5fefefeffffff")
+NWS_STEPS = ((5, (4, 233, 231)), (10, (1, 159, 244)), (15, (3, 0, 244)), (20, (2, 253, 2)), (25, (1, 197, 1)),
+             (30, (0, 142, 0)), (35, (253, 248, 2)), (40, (229, 188, 0)), (45, (253, 149, 0)), (50, (253, 0, 0)),
+             (55, (212, 0, 0)), (60, (188, 0, 0)), (65, (248, 0, 253)), (70, (152, 84, 198)), (75, (253, 253, 253)))
+RADAR_MIN_DBZ = 10           # default: hides clear-air static, keeps drizzle and light snow
+_pal_img = Image.new("P", (1, 1))
+_pal_img.putpalette(IEM_PALETTE)
+
+
+def iem_dbz(i):
+    return None if i in (0, 255) else (i - 1) / 2 - 32
+
+
+def nws_color(dbz):
+    col = NWS_STEPS[0][1]
+    for t, c in NWS_STEPS:
+        if dbz >= t:
+            col = c
+    return col
+
+
+_NWS_PAL = bytes(v for i in range(256) for v in (nws_color(iem_dbz(i)) if iem_dbz(i) is not None else (0, 0, 0)))
+
+
+def clean_iem_tile(tile, min_dbz):
+    """An IEM radar tile (RGBA) with weak echoes and specks removed, recoloured to the NWS colours."""
+    rgb = tile.convert("RGB")
+    q = rgb.quantize(palette=_pal_img, dither=Image.Dither.NONE)
+    # safety: if most of the tile's colours aren't from this palette (IEM changed it?), leave the tile as it is
+    seen = tile.getchannel("A").point(lambda a: 255 if a > 0 else 0)
+    dr, dg, db = ImageChops.difference(q.convert("RGB"), rgb).split()
+    off = ImageChops.multiply(ImageChops.lighter(ImageChops.lighter(dr, dg), db).point(lambda v: 255 if v > 6 else 0), seen)
+    n_seen, n_off = seen.histogram()[255], off.histogram()[255]
+    if n_seen and n_off > n_seen * 0.3:
+        return tile
+    idx = Image.frombytes("L", q.size, q.tobytes())
+    keep = [0 if iem_dbz(i) is None or iem_dbz(i) < min_dbz else 255 for i in range(256)]
+    alpha = ImageChops.multiply(idx.point(keep), tile.getchannel("A"))
+    alpha = alpha.filter(ImageFilter.MedianFilter(3))      # lone pixels of noise go; real rain areas stay
+    q.putpalette(_NWS_PAL)
+    out = q.convert("RGB")
+    out.putalpha(alpha)
+    return out
+
+
 class Radar:
     """A map centred on the location with the latest radar frames on top. Base-map tiles are cached on disk for
     good; radar tiles are fetched gently (RainViewer allows 100 requests a minute)."""
@@ -329,7 +395,7 @@ class Radar:
                 pass
         return img
 
-    def layer(self, frame, lat, lon, z, w, h, stop=None):
+    def layer(self, frame, lat, lon, z, w, h, stop=None, min_dbz=RADAR_MIN_DBZ):
         """One radar frame drawn for this map: an RGBA layer, or None if no tile came back.
         frame = {"time", "kind": past|future, "key", "url": template with {z} {x} {y}, "gap": seconds between tiles}"""
         cx, cy = world_px(lat, lon, z)
@@ -344,6 +410,8 @@ class Radar:
                 continue
             try:
                 t = Image.open(io.BytesIO(http_bytes(frame["url"].format(z=z, x=tx % n, y=ty)))).convert("RGBA")
+                if frame.get("source") in ("nexrad", "hrrr") and min_dbz is not None:
+                    t = clean_iem_tile(t, min_dbz)
                 if t.size != (TILE, TILE):        # 256-pixel tiles cover the same area: just scale them up
                     t = t.resize((TILE, TILE), Image.BILINEAR)
                 layer.alpha_composite(t, (int(tx * TILE - x0), int(ty * TILE - y0)))
@@ -545,6 +613,8 @@ class WeatherService:
             stop = lambda: self.app.stop_evt.is_set()
             slides = cfg.get("slides") or DEFAULT_SLIDES
             frames_wanted = max(1, min(12, int(cfg.get("radar_frames") or 6)))
+            mz = cfg.get("radar_min_dbz", RADAR_MIN_DBZ)
+            min_dbz = None if mz in (None, "", "all") else float(mz)
             jobs, ok = [], True
             try:
                 past = past_frames(loc, frames_wanted)
@@ -575,7 +645,8 @@ class WeatherService:
                 if base is None:
                     base = self.radar.basemap(lat, lon, z, w, h, style)
                 # frames already drawn for this map are reused: each refresh normally fetches just the newest one
-                have = {f[3]: f for f in (old.get("frames") or [])} if old.get("zoom") == z and old.get("size") == (w, h) else {}
+                have = {f[3]: f for f in (old.get("frames") or [])} \
+                    if old.get("zoom") == z and old.get("size") == (w, h) and old.get("min_dbz", RADAR_MIN_DBZ) == min_dbz else {}
                 got = {}
                 for fr in reversed(wanted):                         # newest first, so the screen catches up quickly
                     if stop():
@@ -583,11 +654,11 @@ class WeatherService:
                     if fr["key"] in have:
                         got[fr["key"]] = have[fr["key"]]
                         continue
-                    lay = self.radar.layer(fr, lat, lon, z, w, h, stop)
+                    lay = self.radar.layer(fr, lat, lon, z, w, h, stop, min_dbz)
                     if lay is not None:
                         got[fr["key"]] = (fr["time"], lay, fr["kind"], fr["key"], fr["source"])
                     frames = sorted(got.values(), key=lambda f: f[0])
-                    st["radar"][name] = {"base": base, "frames": frames, "zoom": z, "size": (w, h),
+                    st["radar"][name] = {"base": base, "frames": frames, "zoom": z, "size": (w, h), "min_dbz": min_dbz,
                                          "base_size": (w, h, style), "fetched": time.time()}
                 frames = sorted(got.values(), key=lambda f: f[0])
                 if not frames and wanted:
@@ -595,7 +666,7 @@ class WeatherService:
                     # nothing new came back: keep older frames only while they're still recent
                     keep = [f for f in (old.get("frames") or []) if f[0] > time.time() - RADAR_DROP]
                     frames = keep
-                st["radar"][name] = {"base": base, "frames": frames, "zoom": z, "size": (w, h),
+                st["radar"][name] = {"base": base, "frames": frames, "zoom": z, "size": (w, h), "min_dbz": min_dbz,
                                      "base_size": (w, h, style), "fetched": time.time()}
             if ok:
                 st["errors"]["radar"] = ""
