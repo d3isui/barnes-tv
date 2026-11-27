@@ -18,6 +18,8 @@ DEFAULT_SETTINGS = {
     "brand_color": "",               # app icon / TV app background colour; empty = Barnes navy
     "brand_recolor": None,           # tint the logos to each theme (None = yes for the Barnes art, no for uploads)
     "bumper_music_path": "",         # default music (file or folder) under text bumpers that don't set their own
+    "music_match_loudness": True,    # bring music beds (bumpers, Up Next cards, guide, weather) down to TV loudness
+    "music_volume_db": 0,            # the user's own adjustment on top, in dB (-30 .. +10)
     "station_name": "Barnes Television Broadcasting System",
     "theme": "barnes",               # station look: guide channel, slates, admin page, TV page (see themes.py)
     "ui_font": "theme",              # admin / TV page font: "theme" or a font id

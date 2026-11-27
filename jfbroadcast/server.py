@@ -617,8 +617,15 @@ class Handler(BaseHTTPRequestHandler):
             p = Path(((qs or {}).get("path") or "").strip().strip('"'))
             if not str(p) or str(p) == ".":
                 return self.json({"kind": "none"})
+            from . import loudness
+            lv = {}
+            if p.is_file() or p.is_dir():
+                if store.settings.get("music_match_loudness", True):
+                    loudness.prewarm([str(p)])          # start measuring right away
+                done, total = loudness.status(str(p))
+                lv = {"measured": done, "measurable": total}
             if p.is_file():
-                return self.json({"kind": "file", "ok": p.suffix.lower() in AUDIO_EXT, "name": p.name})
+                return self.json({"kind": "file", "ok": p.suffix.lower() in AUDIO_EXT, "name": p.name, **lv})
             if p.is_dir():
                 n = 0
                 for f in p.rglob("*"):
@@ -626,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
                         n += 1
                         if n >= 5000:
                             break
-                return self.json({"kind": "folder", "ok": n > 0, "files": n})
+                return self.json({"kind": "folder", "ok": n > 0, "files": n, **lv})
             return self.json({"kind": "missing", "ok": False})
         if rest == "packs" and method == "GET":
             from .graphics import bumper_needs_weather

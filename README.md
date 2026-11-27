@@ -264,6 +264,12 @@ of text cards. For each one you set:
   - optionally your own font file and music. Bumpers without their own music use the **Default music for
     bumpers** set at the top of the Bumpers page (a file, or a folder for a random track each time). If that's not
     set either, they use the channel's music, or play silent.
+- **Music volume:** music is mastered much louder than TV, so by default every music track is measured once (in the
+  background, the first time it's used) and turned down to the same loudness as the shows. On channels with **Even
+  out loudness** on, music matches that level instead. The **Music volume** slider under the default music adds your
+  own adjustment on top, from -30 to +10 dB. It covers all background music: bumpers, "Up Next" cards, the guide and
+  the weather channel. Untick **Match music to the shows' volume** to play music as recorded, with only the slider
+  applied.
 - **Live details** in the text: `{show}`, `{episode}`, `{next}`, `{next_time}`, `{channel}`, `{number}`,
   `{station}`, `{time}` and `{day}`.
 - **Weather details** from your weather channel's forecast: `{weather}` ("41° and light rain"), `{temp}`,

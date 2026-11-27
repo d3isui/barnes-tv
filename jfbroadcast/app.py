@@ -12,7 +12,7 @@ from .ffmpeg import Builder
 from . import fontlib, themes
 from .weather import WeatherService
 from .adsplit import AdSplitter
-from . import branding
+from . import branding, loudness
 from .graphics import Fonts, font_set
 from .hls import HLSManager
 from .lock import ChannelLock
@@ -245,7 +245,13 @@ class App:
         pub = (self.store.settings.get("public_url") or "").rstrip("/")
         return pub or f"http://{lan_ip()}:{self.port}"
 
+    def music_paths(self):
+        st = self.store.settings
+        return [st.get("bumper_music_path")] + [c.get("music_path") for c in self.store.channels()] + \
+               [b.get("music_path") for b in self.store.bumpers()]
+
     def start_maintenance(self):
+        loudness.init(self.store.data_dir / "cache" / "music-loudness.json", self.ffmpeg_path)
         threading.Thread(target=self._maintain, daemon=True, name="maintenance").start()
         threading.Thread(target=self.cast.start, daemon=True, name="cast-discovery").start()
 
@@ -253,6 +259,11 @@ class App:
         time.sleep(3)
         while not self.stop_evt.is_set():
             st = self.store.settings
+            if st.get("music_match_loudness", True):
+                try:
+                    loudness.prewarm(self.music_paths())       # measure new music in the background
+                except Exception as e:
+                    log.warning("music loudness scan failed: %s", e)
             if st.get("jellyfin_api_key"):
                 for ch in self.store.channels():
                     if ch.get("type") in ("guide", "weather") or not ch.get("enabled", True):

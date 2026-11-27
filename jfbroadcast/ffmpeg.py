@@ -5,6 +5,7 @@ import subprocess
 import re
 import random
 
+from . import loudness
 from .config import IS_WINDOWS, NO_WINDOW
 from .graphics import image_size
 from . import branding
@@ -157,6 +158,24 @@ class Builder:
             return []
         return ["-ss", f"{random.uniform(0, length - 60):.2f}"]
 
+    def music_af(self, ch, path):
+        """Audio filters for a music bed: a fixed gain so the music plays as loud as the shows (measured once per
+        file), plus the user's own volume adjustment."""
+        try:
+            extra = max(-30.0, min(10.0, float(self.st.get("music_volume_db") or 0)))
+        except (TypeError, ValueError):
+            extra = 0.0
+        if self.st.get("music_match_loudness", True):
+            target = loudness.NORMALIZED_LUFS if ch.get("normalize_audio") and ch.get("type") not in ("guide", "weather") \
+                else loudness.TV_LUFS
+            g = loudness.gain_db(path, target, extra)
+        else:
+            g = extra
+        if abs(g) < 0.05:
+            return ""
+        # turning quiet music up could clip: a limiter catches the peaks
+        return f",volume={g:.1f}dB" + (",alimiter=limit=0.95:level=0" if g > 0 else "")
+
     # ------------------------------------------------------------ overlays
     def _overlay_graph(self, ch, base_label, logo_path, up_next=None):
         """Returns (graph fragment, output label, uses_logo_input)."""
@@ -248,9 +267,11 @@ class Builder:
         bed_idx = n_in
         still = bool(image or concat)
         need_bed = still or not has_audio
+        bed_af, bed_music = "", False
         if need_bed:
             if music and os.path.isfile(music):
                 cmd += ["-stream_loop", "-1"] + self.music_start(music) + re_ + ["-i", music]
+                bed_af, bed_music = self.music_af(ch, music), True
             else:
                 cmd += ["-f", "lavfi"] + re_ + ["-i", "anullsrc=r=48000:cl=stereo"]
         # ---- filtergraph
@@ -292,7 +313,7 @@ class Builder:
         # identical colour tags on every segment, so the H.264 headers never change mid-stream
         graph.append(f"[{cur}]format=yuv420p,{TAGS}{'' if preview else vtail}[v]")
         a_in = f"{bed_idx}:a" if need_bed else (f"0:a:{audio_index}" if audio_index is not None else "0:a:0")
-        anorm = ",loudnorm=I=-16:TP=-1.5:LRA=11" if ch.get("normalize_audio") and not still else ""
+        anorm = bed_af + (",loudnorm=I=-16:TP=-1.5:LRA=11" if ch.get("normalize_audio") and not still and not bed_music else "")
         if still and music and os.path.isfile(music) and duration > 3:
             anorm += f",afade=t=in:d=0.4,afade=t=out:st={max(0.0, duration - 1.2):.2f}:d=1.2"
         if not preview:
@@ -320,8 +341,10 @@ class Builder:
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"] + pre + [
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-framerate", "1",
             "-thread_queue_size", "64", "-i", "pipe:0"]
+        music_af = ""
         if music and os.path.isfile(music):
             cmd += ["-stream_loop", "-1"] + self.music_start(music) + ["-re", "-i", music]
+            music_af = self.music_af(ch, music)
         else:
             cmd += ["-f", "lavfi", "-re", "-i", "anullsrc=r=48000:cl=stereo"]
         chain = [f"fps={fps}"]
@@ -339,7 +362,7 @@ class Builder:
                     f":fontcolor={label_color}:x={int(crawl_x0 - crawl_size * 0.6)}-tw:y={crawl_y}-th/2"
                     f":box=1:boxcolor={label_box}:boxborderw={max(6, crawl_size // 2)}")
         v = "[0:v]" + ",".join(chain) + f",scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,{TAGS}{vtail}[v]"
-        a = "[1:a]aresample=48000:async=1,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]"
+        a = f"[1:a]aresample=48000:async=1{music_af},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]"
         cmd += ["-filter_complex", v + ";" + a, "-map", "[v]", "-map", "[a]"] + venc + [
             "-c:a", "aac", "-b:a", f"{int(st.get('audio_bitrate_kbps') or 192)}k",
             "-flush_packets", "1", "-f", "mpegts", "-mpegts_service_id", "1",
@@ -353,8 +376,10 @@ class Builder:
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"] + pre + [
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{canvas_h}", "-framerate", "1",
             "-thread_queue_size", "64", "-i", "pipe:0"]
+        music_af = ""
         if music and os.path.isfile(music):
             cmd += ["-stream_loop", "-1"] + self.music_start(music) + ["-re", "-i", music]
+            music_af = self.music_af(ch, music)
         else:
             cmd += ["-f", "lavfi", "-re", "-i", "anullsrc=r=48000:cl=stereo"]
         spd = max(5, int(speed * H / 720))
@@ -364,7 +389,7 @@ class Builder:
                  f"[hh][bb]vstack=2,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,{TAGS}{vtail}[v]")
         else:
             v = f"[0:v]fps={fps},crop={W}:{H}:0:0,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,{TAGS}{vtail}[v]"
-        a = "[1:a]aresample=48000:async=1,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]"
+        a = f"[1:a]aresample=48000:async=1{music_af},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]"
         cmd += ["-filter_complex", v + ";" + a, "-map", "[v]", "-map", "[a]"] + venc + [
             "-c:a", "aac", "-b:a", f"{int(st.get('audio_bitrate_kbps') or 192)}k",
             "-flush_packets", "1", "-f", "mpegts", "-mpegts_service_id", "1",

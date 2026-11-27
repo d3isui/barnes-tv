@@ -873,7 +873,14 @@ async function showBumpers() {
       <label class="f" style="flex:1">🎵 Default music for bumpers (a file or a folder on the Broadcast server; a folder plays a random track each time)
         <input type="text" id="bmusic" value="${esc(settings.bumper_music_path || "")}" placeholder="e.g. D:\Music\Bumper Beds"></label>
       <button class="btn" id="bmusic_save">Save</button></div>
-      <div class="sub" id="bmusic_info" style="margin-top:6px">Used by every text bumper that doesn't pick its own music. With nothing set, bumpers use the channel's music, or play silent.</div></div>
+      <div class="sub" id="bmusic_info" style="margin-top:6px">Used by every text bumper that doesn't pick its own music. With nothing set, bumpers use the channel's music, or play silent.</div>
+      <div class="row" style="align-items:flex-end;gap:16px;margin-top:12px;flex-wrap:wrap">
+        <label class="check" style="flex:1;min-width:260px"><input type="checkbox" id="mlevel_match" ${settings.music_match_loudness !== false ? "checked" : ""}>
+          Match music to the shows' volume <span class="sub">(recommended: music is mastered much louder than TV, so each track is measured once and turned down to match)</span></label>
+        <label class="f" style="min-width:260px">🔊 Music volume: <b id="mlevel_val"></b>
+          <input type="range" id="mlevel" min="-30" max="10" step="1" value="${+settings.music_volume_db || 0}">
+          <span class="row sub" style="justify-content:space-between"><span>quieter</span><span>louder</span></span></label></div>
+      <div class="sub" style="margin-top:4px">Applies to all background music: bumpers, “Up Next” cards, the guide and the weather channel. Changes apply from the next bumper or card.</div></div>
     <div class="presets" style="margin:12px 0 16px">${FILTERS.map(([k, l]) => `<button class="btn small ${bumperFilter === k ? "primary" : ""}" data-bf="${k}">${l} <span class="sub">${list.filter((b) => matchF(k, b)).length}</span></button>`).join("")}</div>
     <div class="bgrid"></div>`;
   $$("[data-bf]").forEach((x) => {
@@ -886,11 +893,28 @@ async function showBumpers() {
       $("#bmusic_info").textContent = r.kind === "folder" ? (r.files ? `✓ Folder with ${r.files >= 5000 ? "5000+" : r.files} audio file${r.files === 1 ? "" : "s"}: a random one plays under each bumper.` : "⚠ That folder has no audio files (mp3, m4a, aac, flac, ogg, opus, wav).")
         : r.kind === "file" ? (r.ok ? `✓ ${r.name} plays under every bumper.` : "⚠ That file isn't an audio type the bumpers can use.")
         : "⚠ Not found on the Broadcast server. Use a path as that computer sees it.";
+      if (r.measurable && $("#mlevel_match").checked && r.measured < r.measurable) {
+        $("#bmusic_info").textContent += ` Measuring volume: ${r.measured} of ${r.measurable} done (in the background; unmeasured tracks are turned down by a typical amount meanwhile).`;
+        clearTimeout(musicInfo.t); musicInfo.t = setTimeout(() => { if ($("#bmusic_info")) musicInfo(); }, 5000);
+      }
     } catch (e) { $("#bmusic_info").textContent = e.message; }
   };
   musicInfo();
+  const mlevelText = () => {
+    const v = +$("#mlevel").value;
+    $("#mlevel_val").textContent = v === 0 ? ($("#mlevel_match").checked ? "matched" : "as recorded") : (v > 0 ? "+" : "") + v + " dB";
+  };
+  mlevelText();
+  const musicDirty = () => $("#bmusic_save").classList.add("primary");
+  $("#mlevel").oninput = () => { mlevelText(); musicDirty(); };
+  $("#mlevel_match").onchange = () => { mlevelText(); musicDirty(); };
+  $("#bmusic").addEventListener("input", musicDirty);
   $("#bmusic_save").onclick = async () => {
-    try { await api("POST", "settings", { bumper_music_path: $("#bmusic").value.trim().replace(/^"|"$/g, "") }); toast("Bumper music saved"); musicInfo(); }
+    try {
+      await api("POST", "settings", { bumper_music_path: $("#bmusic").value.trim().replace(/^"|"$/g, ""),
+        music_match_loudness: $("#mlevel_match").checked, music_volume_db: +$("#mlevel").value });
+      toast("Music settings saved"); $("#bmusic_save").classList.remove("primary"); musicInfo();
+    }
     catch (e) { toast(e.message, true); }
   };
   $("#bmusic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#bmusic_save").click(); });
