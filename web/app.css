@@ -170,3 +170,13 @@ input[type=color] { width: 100%; height: 38px; border: 1px solid var(--line); bo
 .pooltab .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
 .pooltab small.warn { display: block; color: var(--accent); }
 .pooltab .wr { white-space: nowrap; }
+
+.slotrow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 4px; border-top: 1px solid var(--line); }
+.slotrow:first-child { border-top: 0; }
+.slotrow.off .slotmain { opacity: .5; }
+.slotrow.editing { background: var(--panel2); border-radius: 8px; }
+.slotrow .slotmain { flex: 1; min-width: 0; }
+.slotrow .slotmain > .sub { margin-top: 3px; }
+.slotrow .warn, .slotedit .warn { color: var(--accent); }
+.slotrow select.small { padding: 2px 6px; font-size: 13px; max-width: 320px; }
+.slotedit { margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }

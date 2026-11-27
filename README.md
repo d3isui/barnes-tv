@@ -39,6 +39,7 @@ that already comes with Jellyfin.
 | <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Building a channel: sources, logo, clock, breaks and a live preview.</sub> |
 | <img src="docs/screenshots/admin-commercials.png" alt="Commercial compilation review"><br><sub>Long commercial compilations are split into separate ads automatically.</sub> | <img src="docs/screenshots/admin-bumpers.png" alt="Bumper library"><br><sub>60+ built-in bumpers, including ones that quote the weather.</sub> |
 | <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | <img src="docs/screenshots/admin-balance.png" alt="Channel pool breakdown"><br><sub>What each channel is made of, with optional airtime balancing per show.</sub> |
+| <img src="docs/screenshots/admin-timeslots.png" alt="Time slots"><br><sub>Time slots: a show at set times, picking up with the next episode.</sub> | |
 
 <sub>Screenshots use a demo library of made-up shows. The demo's weather map is a simplified drawing, not real map tiles.</sub>
 
@@ -58,6 +59,8 @@ that already comes with Jellyfin.
   takes turns between shows (each show's episodes still in order). With one big show and one tiny one, the tiny
   one will rerun more often to keep them apart. Untick **Never play the same show twice in a row** on a channel to
   turn this off.
+- **Time slots.** Put a show, movie or collection on at set times, for example *The Simpsons, Mon–Fri 8–9 PM* or
+  *a movie every Friday at 8*. Regular programming fills the rest of the day.
 - **See what a channel is made of, and balance it.** Each channel's page has a pie chart of its pool, by number of
   items or by hours, plus the airtime each show is set to get and what's actually scheduled. Balancing is off by
   default. You can slide **Even out the shows** toward equal time so a 300-episode show doesn't drown out a
@@ -195,6 +198,40 @@ the chart shows.
 
 Saving rebuilds the schedule, starting after whatever is on now. Turn the slider back to Off, or click **Reset balancing**, to
 return to the original behavior.
+
+### Time slots
+
+Under **Edit channel → Time slots**, **+ Add a time slot** puts something on at set times. Regular programming fills
+the rest of the day. For each slot you choose:
+
+- **What plays:** a series, collection, playlist, genre, or anything else you can add to a channel. It doesn't have to
+  be part of the channel's regular programming.
+- **When:** days of the week (with **Mon–Fri**, **Weekends** and **Every day** shortcuts) or a single date, and the start
+  and end times. An end time earlier than the start runs past midnight. You can also limit a weekly slot to a range of
+  dates, such as a holiday season.
+- **How much:** keep playing from the start time to the end time, or play **one episode or movie** at the start time
+  and then go back to regular programming.
+- **Order:** **In order** plays the next episode each time, like a real weekly show, and picks up where it left off.
+  **Shuffle** and **Random** are also available.
+- **When it's time to start:**
+  - **Start on time** (default): whatever is on before ends early. A shorter show, or the channel's filler and an "Up
+    Next" card, fills the gap.
+  - **Cut off** whatever is playing.
+  - **Wait** for it to finish, so the slot starts late.
+- **If the next one would run past the end:**
+  - **End on time** (default): don't start it; filler and an "Up Next" card fill the rest.
+  - **Let it finish**, even past the end time.
+  - **Cut it off** at the end time.
+
+  The first program of a slot always airs, even if it's longer than the slot.
+- **Commercial breaks** during the slot (on by default, using the channel's break settings).
+- **Only show this in its time slot**, to take it out of the channel's regular programming.
+
+Each slot in the list shows what it found in Jellyfin and when it airs next, with the episodes. For **In order** slots,
+**Next episode** lets you pick where it continues from. A slot can be turned off with its checkbox without deleting it.
+If two slots overlap, the card warns you. When they overlap, the one that starts first plays and the other is skipped
+that day. Time slots appear in the schedule, the guide and the EPG like any other program, marked 📅 on the channel's
+page. Saving re-plans the schedule, starting after whatever is on now.
 
 ### Commercial breaks
 

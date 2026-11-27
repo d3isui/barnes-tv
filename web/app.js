@@ -280,6 +280,7 @@ async function showChannel(id) {
   const WX_SLIDES = [["current", "Current conditions"], ["hourly", "Next 12 hours"], ["daily", "7-day forecast"], ["radar_local", "Local radar"],
     ["radar_regional", "Regional radar"], ["radar_future", "Future radar (forecast, US only)"], ["almanac", "Sun & moon"], ["alerts", "Weather alerts (only when there are any)"]];
   const sources = [...(ch.sources || [])], exclude = [...(ch.exclude || [])], fillers = [...(ch.filler_sources || [])];
+  const slots = (ch.slots || []).map((s) => ({ ...s, sources: [...(s.sources || [])], days: [...(s.days || [])] }));
   const logo = ch.logo || {}, clock = ch.clock || {}, un = ch.up_next || {}, hl = ch.header_logo || {};
   const HL_MODES = [["station", `Station logo (${esc(BRAND.short)})`], ["channel", "This channel's logo"], ["custom", "A different image…"],
     ["name", "Station name as text"], ["none", "Nothing"]];
@@ -363,6 +364,12 @@ async function showChannel(id) {
       ${sourcePicker("fil", "Filler for the gaps", "When shows start on the hour/half hour, gaps are filled with these (commercials, music videos, shorts ≤ 15 min). Anything left over shows an “Up Next” card.")}
       <label class="f wide">Music under “Up Next” cards (file or folder on the Broadcast server, optional)<input type="text" id="music_path" value="${esc(ch.music_path || "")}"></label>
     </div></div>
+    <div class="card" id="slotcard"><h2>📅 Time slots</h2>
+      <p class="sub" style="margin-top:0">Shows, movies or collections that air at set times, like “The Simpsons, Mon–Fri 8–9 PM” or
+        “a movie every Friday at 8”. Regular programming fills the rest of the day. Changes apply when you save.</p>
+      <div id="slotlist"></div>
+      <div id="sloted" class="slotedit" style="display:none"></div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="slot_add">+ Add a time slot</button></div></div>
     <div class="card" id="poolcard"><h2>📊 What's on this channel</h2>
       <div class="row"><div class="seg" id="pool_mode">${[["items", "Items"], ["hours", "Hours"], ["plan", "Airtime goal"], ["sched", "Scheduled"]]
         .map(([k, l]) => `<button class="btn small" data-pm="${k}">${l}</button>`).join("")}</div><span class="spacer"></span><span class="sub" id="pool_total">Loading…</span></div>
@@ -503,7 +510,8 @@ async function showChannel(id) {
   }
   const pickerBits = /-(q|list|type)$/;
   ["input", "change"].forEach((ev) => $(".editor").addEventListener(ev, (e) => {
-    if (e.target.matches("input, select, textarea") && !pickerBits.test(e.target.id || "") && !["logofile", "hlfile", "pv_slide"].includes(e.target.id)) markDirty();
+    if (e.target.matches("input, select, textarea") && !pickerBits.test(e.target.id || "") && !e.target.closest("[data-nodirty]") &&
+      !["logofile", "hlfile", "pv_slide"].includes(e.target.id)) markDirty();
   }));
   $$(".corners button").forEach((x) => x.addEventListener("click", markDirty));
   leaveGuard = (silent) => !dirty || (!silent && confirm("This channel has unsaved changes. Leave without saving?"));
@@ -544,7 +552,7 @@ async function showChannel(id) {
       item_types: $$("[data-itype]").filter((x) => x.checked).map((x) => x.dataset.itype),
       include_specials: $("#include_specials").checked, min_minutes: +$("#min_minutes").value || 0,
       max_minutes: +$("#max_minutes").value || 0, order: $("#order").value, no_repeat_show: $("#no_repeat_show").checked,
-      balance: poolBalance(),
+      balance: poolBalance(), slots: slots.map((s) => ({ ...s })),
       padding_minutes: +$("#padding_minutes").value,
       audio_language: $("#audio_language").value, normalize_audio: $("#normalize_audio").checked,
       subtitles: { mode: $("#sub_mode").value, language: $("#sub_lang").value, size: $("#sub_size").value, font: $("#sub_font").value,
@@ -578,7 +586,7 @@ async function showChannel(id) {
 loadStatus();
     return d;
   };
-  $("#save").onclick = async () => { try { await save(); loadSchedule(); setTimeout(() => loadPool && loadPool(), 1500); } catch (e) { toast(e.message, true); } };
+  $("#save").onclick = async () => { try { await save(); loadSchedule(); setTimeout(() => { loadPool && loadPool(); loadSlots && loadSlots(); }, 1500); } catch (e) { toast(e.message, true); } };
   $("#castbtn").onclick = () => castDialog(ch.id, `${ch.number} ${ch.name}`);
   if ($("#sub_check")) $("#sub_check").onclick = async () => {
     $("#sub_result").textContent = "Checking…";
@@ -742,6 +750,147 @@ loadStatus();
     if (busy.length || d.refreshing) setTimeout(loadComp, 3000);
   }
   if (!guide) loadComp();
+  // ---- time slots
+  const DAYN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const SLOT_ORDER = { sequential: "In order: the next episode each time", shuffle: "Shuffle: everything once before repeats", random: "Random" };
+  const SLOT_LEAD = { fit: "Start on time: whatever's before it ends early (a shorter show or filler fills the gap)",
+    cut: "Start on time: cut off whatever is playing", late: "Wait for the show that's on to finish (the slot starts late)" };
+  const SLOT_OVER = { fit: "End on time: don't start anything that would run past the end", finish: "Let the last one finish, even past the end time",
+    cut: "Cut off at the end time" };
+  let SLOTINFO = {}, editing = -1, editCopy = null;
+  const hm2min = (s) => { const [h, m] = (s || "0:0").split(":").map(Number); return h * 60 + m; };
+  const fmtHM = (s) => { const [h, m] = (s || "0:0").split(":").map(Number); return new Date(2000, 0, 1, h % 24, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+  const daysText = (d) => { const k = [...d].sort().join("");
+    return k === "0123456" ? "Every day" : k === "01234" ? "Mon–Fri" : k === "56" ? "Weekends" : k === "" ? "No days picked" : [...d].sort().map((x) => DAYN[x]).join(", "); };
+  const slotName = (s) => s.name || (SLOTINFO[s.id] && SLOTINFO[s.id].label) || s.sources.map((x) => x.name).join(", ") || "New time slot";
+  const slotWhen = (s) => (s.repeat === "once" ? (s.date ? new Date(s.date + "T12:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "No date picked") : daysText(s.days)) +
+    " · " + (s.play === "one" ? `at ${fmtHM(s.start)}, one ${s.order === "sequential" ? "episode" : "program"}` : `${fmtHM(s.start)} – ${fmtHM(s.end)}`);
+  function slotRanges(s) {    // [[weekday, startMin, endMin]] in "minutes of the week", for overlap warnings
+    if (!s.enabled || s.repeat === "once") return [];
+    const a = hm2min(s.start), b = s.play === "one" ? a + 30 : (hm2min(s.end) <= a ? hm2min(s.end) + 1440 : hm2min(s.end));
+    return s.days.map((d) => [d * 1440 + a, d * 1440 + b]);
+  }
+  function slotWarnings(i) {
+    const s = slots[i], w = [];
+    if (!s.sources.length) w.push("Pick what plays in this slot.");
+    if (s.repeat === "weekly" && !s.days.length) w.push("Pick at least one day.");
+    if (s.repeat === "once" && !s.date) w.push("Pick a date.");
+    if (s.play === "fill" && s.start === s.end) w.push("Start and end are the same time.");
+    const mine = slotRanges(s);
+    slots.forEach((o, j) => {
+      if (j === i) return;
+      const hit = slotRanges(o).some(([a, b]) => mine.some(([c, d]) => [[0], [7 * 1440], [-7 * 1440]].some(([sh]) => c + sh < b && a < d + sh)));
+      if (hit) w.push(`Overlaps “${slotName(o)}”. When they overlap, the one that starts first plays and the other is skipped that day${o.play === "one" || s.play === "one" ? "" : ""}.`);
+    });
+    const inf = SLOTINFO[s.id];
+    if (inf && s.sources.length && !inf.items && !dirty) w.push("Nothing found in Jellyfin for this yet.");
+    return w;
+  }
+  function drawSlots() {
+    if (!$("#slotlist")) return;
+    $("#slotlist").innerHTML = slots.length ? slots.map((s, i) => {
+      const inf = SLOTINFO[s.id] || {}, warn = slotWarnings(i);
+      const next = (inf.airings || [])[0];
+      return `<div class="slotrow ${s.enabled ? "" : "off"} ${editing === i ? "editing" : ""}">
+        <label class="check" title="On / off"><input type="checkbox" data-slon="${i}" ${s.enabled ? "checked" : ""}></label>
+        <div class="slotmain"><b>${esc(slotName(s))}</b> <span class="sub">${esc(slotWhen(s))}</span>
+          <div class="sub">${s.play === "fill" ? esc(SLOT_ORDER[s.order].split(":")[0]) : ""}${inf.items ? `${s.play === "fill" ? " · " : ""}${inf.items} item${inf.items > 1 ? "s" : ""} (${inf.hours} h)` : ""}${s.exclusive ? " · only in this slot" : ""}</div>
+          ${next && s.enabled ? `<div class="sub">Next: <b>${fmtDay(next.start)} ${fmtTime(next.start)}</b> · ${next.programs.map((p) => esc(p.subtitle ? `${p.subtitle}${p.title && s.order !== "sequential" ? " " + p.title : ""}` : p.title)).join(", ")}</div>` : ""}
+          ${inf.episodes && s.enabled ? `<div class="sub" data-nodirty>Next episode: <select data-slnext="${i}" class="small">${inf.episodes.map((e) =>
+            `<option value="${esc(e.id)}" ${e.id === inf.next_id ? "selected" : ""}>${esc(e.label)}</option>`).join("")}</select></div>` : ""}
+          ${warn.map((x) => `<div class="sub warn">⚠ ${esc(x)}</div>`).join("")}</div>
+        <div class="row" style="gap:6px"><button class="btn small" data-sled="${i}">Edit</button><button class="btn small" data-sldel="${i}" title="Delete">✕</button></div></div>`;
+    }).join("") : '<p class="sub">No time slots yet: this channel plays its regular programming around the clock.</p>';
+    $$("[data-slon]").forEach((x) => (x.onchange = () => { slots[+x.dataset.slon].enabled = x.checked; markDirty(); drawSlots(); }));
+    $$("[data-sled]").forEach((x) => (x.onclick = () => openSlot(+x.dataset.sled)));
+    $$("[data-sldel]").forEach((x) => (x.onclick = () => {
+      const i = +x.dataset.sldel;
+      if (!confirm(`Delete the time slot “${slotName(slots[i])}”?`)) return;
+      slots.splice(i, 1); if (editing === i) closeSlot(); else if (editing > i) editing--;
+      markDirty(); drawSlots();
+    }));
+    $$("[data-slnext]").forEach((x) => (x.onchange = async () => {
+      const s = slots[+x.dataset.slnext];
+      if (dirty) { toast("Save your changes first, then pick the next episode", true); drawSlots(); return; }
+      try {
+        const r = await api("POST", `channels/${ch.id}/slots/${encodeURIComponent(s.id)}/next`, { id: x.value });
+        SLOTINFO = Object.fromEntries(r.map((z) => [z.id, z])); drawSlots(); loadSchedule();
+        toast("Next episode set: the schedule after what's on now was re-planned");
+      } catch (e) { toast(e.message, true); }
+    }));
+  }
+  function slotForm(s) {
+    return `<div class="form">
+      <label class="f wide">Name (optional, shown in this list)<input type="text" id="sl_name" value="${esc(s.name)}" placeholder="e.g. Prime time Simpsons"></label>
+      ${sourcePicker("sl", "What plays", "A series, a collection, a playlist, a genre… anything you can add to a channel. It doesn't have to be in the channel's regular programming.")}
+      <label class="f">Repeats<select id="sl_repeat"><option value="weekly">Every week</option><option value="once" ${s.repeat === "once" ? "selected" : ""}>Just once</option></select></label>
+      <label class="f" id="sl_date_w">Date<input type="date" id="sl_date" value="${esc(s.date)}"></label>
+      <div class="wide" id="sl_days_w"><h3>Days</h3><div class="row" style="gap:6px;flex-wrap:wrap">
+        ${DAYN.map((d, i) => `<button type="button" class="btn small ${s.days.includes(i) ? "primary" : ""}" data-sday="${i}">${d}</button>`).join("")}
+        <span class="sub" style="margin:0 4px">or</span>
+        <button type="button" class="btn small" data-sdays="01234">Mon–Fri</button><button type="button" class="btn small" data-sdays="56">Weekends</button>
+        <button type="button" class="btn small" data-sdays="0123456">Every day</button></div></div>
+      <label class="f">Plays<select id="sl_play"><option value="fill">From the start time to the end time</option>
+        <option value="one" ${s.play === "one" ? "selected" : ""}>One episode or movie at the start time</option></select></label>
+      <label class="f">Starts at<input type="time" id="sl_start" value="${esc(s.start)}"></label>
+      <label class="f" id="sl_end_w">Ends at<input type="time" id="sl_end" value="${esc(s.end === "24:00" ? "00:00" : s.end)}"><span class="sub">Earlier than the start = past midnight</span></label>
+      <label class="f wide">Order<select id="sl_order">${Object.entries(SLOT_ORDER).map(([k, v]) => `<option value="${k}" ${s.order === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label class="f wide">When it's time to start<select id="sl_lead">${Object.entries(SLOT_LEAD).map(([k, v]) => `<option value="${k}" ${s.lead_in === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label class="f wide" id="sl_over_w">If the next one would run past the end<select id="sl_over">${Object.entries(SLOT_OVER).map(([k, v]) => `<option value="${k}" ${s.overrun === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <span class="sub">Leftover time before the end gets the channel's filler and an “Up Next” card.</span></label>
+      <label class="check wide"><input type="checkbox" id="sl_breaks" ${s.breaks ? "checked" : ""}> Commercial breaks during the slot (the channel's own break settings)</label>
+      <label class="check wide"><input type="checkbox" id="sl_excl" ${s.exclusive ? "checked" : ""}> Only show this in its time slot <span class="sub">(take it out of the channel's regular programming)</span></label>
+      <details class="wide" id="sl_range_w" ${s.from_date || s.until_date ? "open" : ""}><summary class="sub">Only between certain dates (e.g. a holiday season)</summary>
+        <div class="row" style="gap:12px;margin-top:8px"><label class="f">From<input type="date" id="sl_from" value="${esc(s.from_date)}"></label>
+        <label class="f">Until<input type="date" id="sl_until" value="${esc(s.until_date)}"></label></div></details>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="sl_done">Done</button><button class="btn" id="sl_cancel">Cancel</button>
+      <span class="sub">Then <b>Save</b> the channel to put it on the schedule.</span></div>`;
+  }
+  function openSlot(i) {
+    editing = i; editCopy = JSON.parse(JSON.stringify(slots[i]));
+    const s = slots[i], ed = $("#sloted");
+    ed.innerHTML = slotForm(s); ed.style.display = "";
+    wireSourcePicker("sl", s.sources, () => { markDirty(); drawSlots(); });
+    const sync = () => {
+      s.name = $("#sl_name").value.trim(); s.repeat = $("#sl_repeat").value; s.date = $("#sl_date").value; s.play = $("#sl_play").value;
+      s.start = $("#sl_start").value || "20:00"; s.end = $("#sl_end").value || "21:00"; s.order = $("#sl_order").value; s.lead_in = $("#sl_lead").value;
+      s.overrun = $("#sl_over").value; s.breaks = $("#sl_breaks").checked; s.exclusive = $("#sl_excl").checked;
+      s.from_date = $("#sl_from").value; s.until_date = $("#sl_until").value;
+      const once = s.repeat === "once", one = s.play === "one";
+      $("#sl_date_w").style.display = once ? "" : "none"; $("#sl_days_w").style.display = once ? "none" : "";
+      $("#sl_range_w").style.display = once ? "none" : ""; $("#sl_end_w").style.display = one ? "none" : ""; $("#sl_over_w").style.display = one ? "none" : "";
+      drawSlots();
+    };
+    $$("input, select", ed).forEach((x) => { if (!/^sl-/.test(x.id)) x.addEventListener(x.type === "text" ? "input" : "change", sync); });
+    const days = () => $$("[data-sday]").forEach((b) => b.classList.toggle("primary", s.days.includes(+b.dataset.sday)));
+    $$("[data-sday]").forEach((b) => (b.onclick = () => { const d = +b.dataset.sday; s.days = s.days.includes(d) ? s.days.filter((x) => x !== d) : [...s.days, d].sort(); days(); markDirty(); drawSlots(); }));
+    $$("[data-sdays]").forEach((b) => (b.onclick = () => { s.days = b.dataset.sdays.split("").map(Number); days(); markDirty(); drawSlots(); }));
+    $("#sl_done").onclick = closeSlot;
+    $("#sl_cancel").onclick = () => { if (editCopy) slots[editing] = editCopy; if (editCopy && editCopy._new) slots.splice(editing, 1); closeSlot(); };
+    sync(); ed.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function closeSlot() {
+    if (editing >= 0 && slots[editing]) delete slots[editing]._new;
+    editing = -1; editCopy = null; $("#sloted").style.display = "none"; $("#sloted").innerHTML = ""; drawSlots();
+  }
+  async function loadSlots() {
+    if (guide || !$("#slotlist")) return;
+    try { SLOTINFO = Object.fromEntries((await api("GET", `channels/${ch.id}/slots`)).map((z) => [z.id, z])); } catch { /* shown as plain list */ }
+    drawSlots();
+  }
+  if (!guide) {
+    $("#slot_add").onclick = () => {
+      if (editing >= 0) closeSlot();
+      slots.push({ id: "ts" + Date.now().toString(36), enabled: true, name: "", sources: [], repeat: "weekly", days: [0, 1, 2, 3, 4], date: "",
+        from_date: "", until_date: "", start: "20:00", end: "21:00", play: "fill", order: "sequential", lead_in: "fit", overrun: "fit",
+        breaks: true, exclusive: false, _new: true });
+      markDirty(); openSlot(slots.length - 1);
+      $("#sl_cancel").onclick = () => { slots.pop(); closeSlot(); };
+    };
+    drawSlots(); loadSlots();
+  }
+
   // ---- pool breakdown & airtime balancing
   const PIE = ["#ffb000", "#4f8cff", "#ff5d73", "#34d399", "#a78bfa", "#f97316", "#22d3ee", "#e879f9", "#a3e635", "#fb7185", "#60a5fa", "#fbbf24"];
   let POOL = null, poolMode = "hours";
@@ -823,7 +972,7 @@ loadStatus();
       $("#sched").innerHTML = s.length ? `<table>${s.map((e) => {
         const day = fmtDay(e.start); const hdr = day !== lastDay ? `<tr><td colspan="2" class="sub"><b>${day}</b></td></tr>` : ""; lastDay = day;
         return hdr + `<tr class="${e.start <= now && now < e.end ? "on" : ""}"><td class="t">${fmtTime(e.start)}</td>
-          <td><b>${esc(e.title)}</b> <span class="sub">${esc(e.subtitle || "")}</span></td></tr>`;
+          <td>${e.slot ? '<span title="Time slot">📅</span> ' : ""}<b>${esc(e.title)}</b> <span class="sub">${esc(e.subtitle || "")}</span></td></tr>`;
       }).join("")}</table>` : '<p class="sub">Nothing scheduled — add some sources and save.</p>';
       const on = $("#sched tr.on"); if (on) $("#sched").scrollTop = on.offsetTop - 40;
     } catch (e) { $("#sched").innerHTML = `<p class="sub">${esc(e.message)}</p>`; }

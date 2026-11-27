@@ -117,6 +117,7 @@ CHANNEL_DEFAULT = {
     "order": "shuffle",              # shuffle | series_rotation | sequential | random
     "no_repeat_show": True,          # never the same show twice in a row (when there's anything else to play)
     # share of airtime per show (off by default: every episode/movie gets its fair turn, so big shows air more)
+    "slots": [],                     # time slots: shows that air at set times (see timeslots.py)
     "balance": {"strength": 0,       # 0 = as the pool is, 100 = every show gets the same airtime
                 "weights": {}},      # per-show fine tuning: {group key: multiplier, 1 = normal}
     "padding_minutes": 0,            # 0 = back-to-back, otherwise start programs on :00/:15/:30 boundaries
@@ -172,7 +173,7 @@ def clean_balance(b):
 
 
 SCHEDULE_KEYS = ("sources", "exclude", "item_types", "include_specials", "min_minutes", "no_repeat_show",
-                 "max_minutes", "order", "padding_minutes", "filler_sources", "type", "breaks", "bumpers", "balance")
+                 "max_minutes", "order", "padding_minutes", "filler_sources", "type", "breaks", "bumpers", "balance", "slots")
 
 # A bumper can be limited to a time of day (checked when it's scheduled) or to the current weather (checked when
 # it airs, from the weather channel's forecast).
@@ -394,6 +395,9 @@ class Store:
                     for k, v in data.items():
                         if isinstance(v, list):
                             self._channels[i][k] = v
+                    if "slots" in data:
+                        from .timeslots import clean_slots
+                        self._channels[i]["slots"] = clean_slots(data["slots"])
                     if "balance" in data:       # replaced whole, so a show set back to "normal" really goes back
                         self._channels[i]["balance"] = clean_balance(data["balance"])
                     self.save()

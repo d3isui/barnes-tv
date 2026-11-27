@@ -14,6 +14,7 @@ import time
 
 from .config import SCHEDULE_KEYS, _atomic_write
 from .jellyfin import Jellyfin, JellyfinError, normalize_item
+from .timeslots import all_occurrences, clean_slots
 
 log = logging.getLogger("scheduler")
 
@@ -130,11 +131,19 @@ def sort_key(it):
     return (it["premiere"] or str(it["year"] or "9999"), it["title"].lower(), 0, "")
 
 
+def _ep_label(it):
+    if it.get("type") == "Episode" and it.get("season") is not None and it.get("episode") is not None:
+        return f"S{int(it['season']):02d}E{int(it['episode']):02d}"
+    return str(it.get("year") or "")
+
+
 class Pool:
     """The playable items for one channel (cached on disk, refreshed periodically)."""
 
-    def __init__(self, items=None, fillers=None, fetched=0, error="", commercials=None, bumpers=None, compilations=None):
+    def __init__(self, items=None, fillers=None, fetched=0, error="", commercials=None, bumpers=None, compilations=None,
+                 slots=None):
         self.items = items or []
+        self.slots = slots or {}     # time slot id -> its items
         self.compilations = compilations or []
         self.fillers = fillers or []
         self.commercials = commercials or []
@@ -142,6 +151,9 @@ class Pool:
         self.fetched = fetched
         self.error = error
         self.by_id = {i["id"]: i for i in self.items}
+        for its in self.slots.values():
+            for i in its:
+                self.by_id.setdefault(i["id"], i)
 
     @property
     def total_seconds(self):
@@ -231,6 +243,16 @@ class ScheduleManager:
                 items = [i for i in items if not (i["type"] == "Episode" and i["season"] == 0)]
             mn, mx = (ch.get("min_minutes") or 0) * 60, (ch.get("max_minutes") or 0) * 60
             items = [i for i in items if i["duration"] >= mn and (not mx or i["duration"] <= mx)]
+            slots = {}
+            for sl in clean_slots(ch.get("slots")):
+                if sl["sources"]:
+                    its = self._resolve(jf, sl["sources"], ch, ["Movie", "Episode", "MusicVideo", "Video"])
+                    if not ch.get("include_specials"):
+                        its = [i for i in its if not (i["type"] == "Episode" and i["season"] == 0)]
+                    slots[sl["id"]] = its
+            excl = {i["id"] for sl in clean_slots(ch.get("slots")) if sl["exclusive"] for i in slots.get(sl["id"], [])}
+            if excl and any(i["id"] not in excl for i in items):     # only in their time slots
+                items = [i for i in items if i["id"] not in excl]
             fillers = self._resolve(jf, ch.get("filler_sources", []), ch,
                                     ["Movie", "Episode", "MusicVideo", "Video", "Trailer"]) if ch.get("filler_sources") else []
             fillers = [f for f in fillers if f["duration"] <= 15 * 60]
@@ -239,18 +261,22 @@ class ScheduleManager:
             commercials, compilations = self._commercials(jf, ch, br, short_types)
             vbumpers = [c for c in self._resolve(jf, bu.get("sources") or [], ch, short_types)
                         if c["duration"] <= 5 * 60] if bu.get("enabled") and bu.get("sources") else []
-            pool = Pool(items, fillers, time.time(), commercials=commercials, bumpers=vbumpers, compilations=compilations)
+            pool = Pool(items, fillers, time.time(), commercials=commercials, bumpers=vbumpers, compilations=compilations,
+                        slots=slots)
             _atomic_write(self._pool_path(cid), json.dumps({"items": items, "fillers": fillers, "fetched": pool.fetched,
+                                                            "slots": slots,
                                                             "commercials": commercials, "bumpers": vbumpers,
                                                             "compilations": compilations,
                                                             "hash": schedule_hash(ch)}))
-            log.info("channel %s (%s): %d items, %d fillers, %d commercials, %d video bumpers", ch["number"],
-                     ch["name"], len(items), len(fillers), len(commercials), len(vbumpers))
+            log.info("channel %s (%s): %d items, %d fillers, %d commercials, %d video bumpers%s", ch["number"],
+                     ch["name"], len(items), len(fillers), len(commercials), len(vbumpers),
+                     f", {len(slots)} time slots ({sum(len(v) for v in slots.values())} items)" if slots else "")
         except (JellyfinError, OSError) as e:
             log.warning("pool refresh failed for %s: %s", ch["name"], e)
             old = self.pools.get(cid) or self._load_pool(ch, any_hash=True)
             pool = Pool(old.items if old else [], old.fillers if old else [], old.fetched if old else 0, str(e),
-                        old.commercials if old else [], old.bumpers if old else [], old.compilations if old else [])
+                        old.commercials if old else [], old.bumpers if old else [], old.compilations if old else [],
+                        old.slots if old else {})
         self.pools[cid] = pool
         return pool
 
@@ -263,7 +289,7 @@ class ScheduleManager:
             if not any_hash and d.get("hash") != schedule_hash(ch):
                 return None
             return Pool(d["items"], d.get("fillers", []), d.get("fetched", 0), commercials=d.get("commercials", []),
-                        bumpers=d.get("bumpers", []), compilations=d.get("compilations", []))
+                        bumpers=d.get("bumpers", []), compilations=d.get("compilations", []), slots=d.get("slots") or {})
         except Exception:
             return None
 
@@ -278,7 +304,7 @@ class ScheduleManager:
                     if self._compilations_changed(p):   # scanned since this pool was saved (or still to scan)
                         force = True
             max_age = float(self.store.settings.get("library_refresh_hours") or 6) * 3600
-            if p is not None and not p.items:
+            if p is not None and not p.items and not any(p.slots.values()):
                 max_age = 120   # empty channel: look again soon (sources may have just been added or scanned)
             if force or p is None or time.time() - p.fetched > max_age:
                 p = self.refresh_pool(ch)
@@ -316,8 +342,10 @@ class ScheduleManager:
                 st["timeline"] = []
             st["deck"], st["recent"] = [], []
             st.pop("queued", None)
+            st.pop("deferred", None)
             st.pop("passes", None)
             st.pop("gdeck", None)
+            st.pop("deferred", None)
             st["hash"] = schedule_hash(ch)
             self._save_state(cid)
         return self.ensure(ch)
@@ -351,6 +379,7 @@ class ScheduleManager:
             else:
                 del tl[i + 1:]
                 st.pop("queued", None)
+                st.pop("deferred", None)
             self._save_state(cid)
         log.info("channel %s: skipped %s", ch.get("name"), label)
         self.ensure(ch, now)
@@ -368,6 +397,7 @@ class ScheduleManager:
             st["timeline"] = tl[:i + 1] if i is not None else [e for e in tl if e["s"] + e["d"] <= now]
             st["deck"], st["recent"] = [], []
             st.pop("queued", None)
+            st.pop("deferred", None)
             st["hash"] = schedule_hash(ch)
             self._save_state(cid)
         return self.ensure(ch, now)
@@ -663,6 +693,234 @@ class ScheduleManager:
             t += gap
         return t
 
+    # ---------- building blocks ----------
+    def _program(self, ch, st, pool, it, t, out, br, slot_id=None, breaks=True):
+        """One program (in parts, with commercial breaks between them) from time t. Returns the end time."""
+        slim = self._slim(it)
+        cuts = self.cut_points(it, br) if pool.commercials and breaks else []
+        pos = 0.0
+        for n, cut in enumerate(cuts + [it["duration"]]):
+            part = {"s": t, "d": round(cut - pos, 3), "k": "program", "i": slim}
+            if cuts:
+                part.update(p=n, o=pos, last=(n == len(cuts)))
+            if slot_id:
+                part["slot"] = slot_id
+            out.append(part)
+            t += cut - pos
+            pos = cut
+            if n < len(cuts):
+                t = self._add_break(ch, st, pool, t, out, it)
+        return t
+
+    @staticmethod
+    def _truncate(entries, limit):
+        """Cut a run of entries off at `limit` (the program just ends there)."""
+        while entries and entries[-1]["s"] >= limit - 0.5:
+            entries.pop()
+        if entries:
+            e = entries[-1]
+            e["d"] = round(max(0.5, limit - e["s"]), 3)
+            if e["k"] == "program" and "p" in e:
+                e["last"] = True
+            e["cut"] = True
+        return limit
+
+    def _next_regular(self, ch, st, pool):
+        """The next regular program: one that had to wait for a time slot comes first."""
+        d = st.get("deferred") or []
+        last = st.get("last_show") if ch.get("no_repeat_show", True) else None
+        regular = {i["id"] for i in pool.items} if d else ()
+        for iid in list(d):
+            it = pool.by_id.get(iid)
+            if not it or iid not in regular:          # gone from the channel's rotation
+                d.remove(iid)
+                continue
+            if last and show_key(it) == last and len(regular) > 1:
+                continue                              # same show as the one just on: it waits a little longer
+            d.remove(iid)
+            st["last_show"] = show_key(it)
+            return it
+        return self._pick(ch, st, pool)
+
+    @staticmethod
+    def _defer(st, it):
+        d = st.setdefault("deferred", [])
+        if it["id"] in d:
+            d.remove(it["id"])
+        d.insert(0, it["id"])
+        del d[4:]
+
+    def _fit_before(self, ch, st, pool, t, limit, out, br):
+        """Fill the time before a slot starts: a shorter program that fits, else filler and an Up Next card."""
+        gap = limit - t
+        brk = (float(br.get("length_seconds") or 120) + 20) if pool.commercials else 0
+        est = lambda i: i["duration"] + len(self.cut_points(i, br)) * brk if brk else i["duration"]
+        cands = [i for i in pool.items if est(i) <= gap]
+        last = st.get("last_show")
+        if ch.get("no_repeat_show", True) and last:
+            cands = [i for i in cands if show_key(i) != last] or cands
+        when = {iid: n for n, iid in enumerate(st["recent"])}
+        cands.sort(key=lambda i: when.get(i["id"], -1))      # least recently played first
+        head = cands[:max(3, len(cands) // 3)]
+        random.shuffle(head)
+        for it in head[:6]:
+            tmp = []
+            t2 = self._program(ch, st, pool, it, t, tmp, br)
+            if t2 <= limit + 1:
+                out += tmp
+                st["recent"].append(it["id"])
+                del st["recent"][:-50]
+                st["last_show"] = show_key(it)
+                return t2
+        return self._fill_gap(st, pool, t, gap, out)
+
+    # ---------- time slots ----------
+    @staticmethod
+    def slot_label(sl, pool):
+        if sl.get("name"):
+            return sl["name"]
+        its = pool.slots.get(sl["id"]) or []
+        titles = list(dict.fromkeys(i["title"] for i in its))
+        if len(titles) == 1:
+            return titles[0]
+        return ", ".join(s.get("name", "") for s in sl.get("sources") or [] if s.get("name")) or "Special programming"
+
+    @staticmethod
+    def _slot_sorted(sl, items):
+        return list(items) if any(s.get("type") == "playlist" for s in sl.get("sources") or []) else sorted(items, key=sort_key)
+
+    def _note_slot_airings(self, st, now):
+        """Remember the last episode each slot actually aired (the timeline only keeps a few hours of history)."""
+        aired, starts = st.setdefault("slot_aired", {}), st.setdefault("slot_start", {})
+        for e in st["timeline"]:
+            sid = e.get("slot")
+            if sid and e["k"] == "program" and e.get("i") and not e.get("p") and e["s"] <= now:
+                aired[sid] = e["i"]["id"]
+                if starts.get(sid) and e["s"] >= starts[sid].get("at", 0) - 1:
+                    starts.pop(sid)
+
+    def _slot_next_seq(self, st, sl, items, tl, new):
+        """In-order slots: the episode after the last one planned (or aired, or the one picked by hand)."""
+        eps = self._slot_sorted(sl, items)
+        pos = {i["id"]: n for n, i in enumerate(eps)}
+        sid = sl["id"]
+        ref = next((e for e in reversed(new) if e.get("slot") == sid and e["k"] == "program" and e.get("i")), None) or \
+            next((e for e in reversed(tl) if e.get("slot") == sid and e["k"] == "program" and e.get("i")), None)
+        start = (st.get("slot_start") or {}).get(sid)
+        if start and start.get("id") in pos and (ref is None or ref["s"] < start.get("at", 0) - 1):
+            return eps[pos[start["id"]]]
+        last = ref["i"]["id"] if ref else (st.get("slot_aired") or {}).get(sid)
+        if last in pos:
+            return eps[(pos[last] + 1) % len(eps)]
+        return eps[0]
+
+    def _slot_pick(self, st, sl, items, tl, new, skip=()):
+        sid = sl["id"]
+        if sl["order"] == "sequential":
+            return self._slot_next_seq(st, sl, items, tl, new)
+        ids = {i["id"]: i for i in items}
+        if sl["order"] == "random":
+            last = (st.get("slot_aired") or {}).get(sid)
+            cands = [i for i in items if i["id"] not in skip and i["id"] != last] or [i for i in items if i["id"] not in skip]
+            return random.choice(cands) if cands else None
+        decks = st.setdefault("slot_deck", {})
+        deck = [d for d in decks.get(sid, []) if d in ids]
+        if not deck:
+            deck = list(reversed(spread_shuffle(items)))
+        for j in range(len(deck) - 1, -1, -1):
+            if deck[j] not in skip:
+                it = ids[deck.pop(j)]
+                decks[sid] = deck
+                return it
+        decks[sid] = deck
+        return None
+
+    @staticmethod
+    def _slot_unpick(st, sl, it):
+        if sl["order"] == "shuffle":
+            st.setdefault("slot_deck", {}).setdefault(sl["id"], []).append(it["id"])
+
+    def _play_slot(self, ch, st, pool, o, t, tl, new, shift=0.0):
+        """Plan one airing of a time slot from time t. Returns the time regular programming picks up again."""
+        sl = o["slot"]
+        items = pool.slots.get(sl["id"]) or []
+        if not items:
+            return t               # nothing found for it in Jellyfin: regular programming carries on
+        fill = sl["play"] == "fill"
+        end = o["end"] + shift
+        br = ch.get("breaks") or {}
+        count, last_it, tried = 0, None, set()
+        while count < 200:
+            if (not fill and count >= 1) or (fill and end - t < MIN_GAP):
+                break
+            it = self._slot_pick(st, sl, items, tl, new, tried)
+            if it is None:
+                break
+            tmp = []
+            t2 = self._program(ch, st, pool, it, t, tmp, br, slot_id=sl["id"], breaks=sl["breaks"])
+            if fill and t2 > end + 1:                 # this one would run past the end of the slot
+                if sl["overrun"] == "cut":
+                    t2 = self._truncate(tmp, end)
+                elif sl["overrun"] == "fit":
+                    if sl["order"] != "sequential" and len(tried) < 8 and len(tried) < len(items) - 1:
+                        tried.add(it["id"])           # try a shorter one
+                        self._slot_unpick(st, sl, it)
+                        continue
+                    if count > 0:
+                        self._slot_unpick(st, sl, it)
+                        break
+                    # nothing shorter to play: the first program of a slot always airs, in full
+            new += tmp
+            t = t2
+            count += 1
+            last_it = it
+        if fill and end - t >= MIN_GAP:
+            t = self._fill_gap(st, pool, t, end - t, new)
+        if last_it:
+            st["last_show"] = show_key(last_it)
+        return t
+
+    def slot_next(self, ch, sid, item_id):
+        """Pick the episode an in-order slot plays next (re-plans the future after what's on now)."""
+        with self.lock(ch["id"]):
+            st = self._load_state(ch["id"])
+            st.setdefault("slot_start", {})[sid] = {"id": item_id, "at": time.time()}
+            st["timeline"] = keep_through_current(st["timeline"], time.time())
+            st.pop("queued", None)
+            st.pop("deferred", None)
+            self._save_state(ch["id"])
+        return self.ensure(ch)
+
+    def slots_info(self, ch):
+        """For the admin page: what each slot found in Jellyfin and its next airings."""
+        pool = self.pool(ch)
+        tl = self.ensure(ch)
+        now = time.time()
+        out = []
+        for sl in clean_slots(ch.get("slots")):
+            items = pool.slots.get(sl["id"]) or []
+            airings, cur = [], None
+            for e in tl:
+                if e.get("slot") != sl["id"] or e["k"] != "program" or e.get("p") or e["s"] + e["d"] < now:
+                    continue
+                if cur is None or e["s"] - cur["end"] > 600:
+                    cur = {"start": e["s"], "end": e["s"], "programs": []}
+                    airings.append(cur)
+                cur["programs"].append({"start": e["s"], "title": e["i"]["title"], "id": e["i"]["id"],
+                                        "subtitle": _ep_label(e["i"])})
+                cur["end"] = e["s"] + e["i"]["duration"]
+            info = {"id": sl["id"], "items": len(items), "hours": round(sum(i["duration"] for i in items) / 3600, 1),
+                    "label": self.slot_label(sl, pool), "airings": airings[:4]}
+            if sl["order"] == "sequential" and items:
+                eps = self._slot_sorted(sl, items)
+                info["episodes"] = [{"id": i["id"], "label": (_ep_label(i) + " · " if i["type"] == "Episode" else "") +
+                                     (i.get("episode_title") or i["title"]) if i["type"] == "Episode" else i["title"]}
+                                    for i in eps[:2000]]
+                nxt = next((p for a in airings for p in a["programs"] if p["start"] > now - 1), None)
+                info["next_id"] = nxt["id"] if nxt else None
+            out.append(info)
+        return out
+
     # ---------- the main entry point ----------
     def ensure(self, ch, now=None):
         """Make sure the channel's timeline covers now .. now + schedule_days. Returns the timeline."""
@@ -677,10 +935,13 @@ class ScheduleManager:
                 st["timeline"] = keep_through_current(st["timeline"], now)
                 st["deck"], st["recent"], st["cursor"], st["seq"] = [], [], {}, 0
                 st.pop("queued", None)
+                st.pop("deferred", None)
                 st.pop("passes", None)
                 st.pop("gdeck", None)
+                st.pop("deferred", None)
                 st["hash"] = h
             tl = st["timeline"]
+            self._note_slot_airings(st, now)
             tl[:] = [e for e in tl if e["s"] + e["d"] > now - KEEP_PAST]
             # the channel was empty before (no sources yet, or Jellyfin unreachable) but now has media: replace
             # the "no programming" placeholders right away instead of waiting for them to run out
@@ -702,42 +963,72 @@ class ScheduleManager:
             queued = pool.by_id.get(queued) if queued else None
             br, bu = ch.get("breaks") or {}, ch.get("bumpers") or {}
             between = bu.get("enabled") and bu.get("between_programs", True)
+            slots = clean_slots(ch.get("slots"))
+            occs = all_occurrences(slots, t - 86400, horizon + 86400) if slots else []
+            # airings already behind us (they're in the part of the timeline that's kept) don't get planned again
+            done = {o["key"] for o in occs if o["start"] < t - MIN_GAP and (o["slot"]["play"] == "one" or o["end"] <= t + MIN_GAP)}
+            shift = {}
             while t < horizon:
+                o = next((o for o in occs if o["key"] not in done and o["end"] > t), None)
+                if o and t >= o["start"] - MIN_GAP:            # a time slot is on
+                    done.add(o["key"])
+                    t = self._play_slot(ch, st, pool, o, t, tl, new, shift.get(o["key"], 0.0))
+                    continue
+                limit = o["start"] if o else None             # regular programming has to make way at this time
                 if queued:
                     st["last_show"] = show_key(queued)
-                it = queued or self._pick(ch, st, pool)
+                before = st.get("last_show")
+                it = queued or self._next_regular(ch, st, pool)
                 queued = None
                 if it is None:
-                    new.append({"s": t, "d": NO_CONTENT_BLOCK, "k": "slate", "i": None, "msg": "nocontent"})
-                    t += NO_CONTENT_BLOCK
+                    d = NO_CONTENT_BLOCK if limit is None else max(MIN_GAP, min(NO_CONTENT_BLOCK, limit - t))
+                    new.append({"s": t, "d": d, "k": "slate", "i": None, "msg": "nocontent"})
+                    t += d
                     continue
-                slim = self._slim(it)
-                cuts = self.cut_points(it, br) if pool.commercials else []
-                pos = 0.0
-                for n, cut in enumerate(cuts + [it["duration"]]):
-                    part = {"s": t, "d": round(cut - pos, 3), "k": "program", "i": slim}
-                    if cuts:
-                        part.update(p=n, o=pos, last=(n == len(cuts)))
-                    new.append(part)
-                    t += cut - pos
-                    pos = cut
-                    if n < len(cuts):
-                        t = self._add_break(ch, st, pool, t, new, it)
+                tmp = []
+                t2 = self._program(ch, st, pool, it, t, tmp, br)
+                if limit is not None and t2 > limit + 1:      # it would still be on when the slot starts
+                    how = o["slot"]["lead_in"]
+                    if how == "late":                         # let it finish: the slot starts late, same length
+                        shift[o["key"]] = t2 - limit
+                    elif how == "cut":
+                        t2 = self._truncate(tmp, limit)
+                    else:                                     # start on time: this one waits until after the slot
+                        self._defer(st, it)
+                        st["last_show"] = before
+                        t = self._fit_before(ch, st, pool, t, limit, new, br)
+                        continue
+                    new += tmp
+                    t = t2
+                    continue
+                new += tmp
+                t = t2
                 if between:
-                    queued = self._pick(ch, st, pool)
-                    ctx = {"show": it["title"], "next": queued["title"] if queued else ""}
+                    queued = self._next_regular(ch, st, pool)
+                    nxt = queued["title"] if queued else ""
+                    if limit is not None and (not queued or t + queued["duration"] > limit):
+                        nxt = self.slot_label(o["slot"], pool)    # the time slot is what's on next
+                    ctx = {"show": it["title"], "next": nxt}
                     probe = []
                     self._add_bumper(ch, st, pool, "next", t, probe, ctx)
                     bdur = probe[0]["d"] if probe else 0
+                    if limit is not None and t + bdur > limit:
+                        probe, bdur = [], 0
                     if pad:
-                        t = self._fill_gap(st, pool, t, align_up(t + bdur, pad) - bdur - t, new)
+                        target = align_up(t + bdur, pad) - bdur
+                        if limit is not None:
+                            target = min(target, limit - bdur)
+                        t = self._fill_gap(st, pool, t, target - t, new)
                     if probe:
                         probe[0]["s"] = t
                         probe[0]["ctx"]["next_start"] = t + bdur
                         new.append(probe[0])
                         t += bdur
                 elif pad:
-                    t = self._fill_gap(st, pool, t, align_up(t, pad) - t, new)
+                    target = align_up(t, pad)
+                    if limit is not None:
+                        target = min(target, limit)
+                    t = self._fill_gap(st, pool, t, target - t, new)
             if queued:
                 st["queued"] = queued["id"]
             tl += new

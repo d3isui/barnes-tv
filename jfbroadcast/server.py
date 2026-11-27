@@ -33,7 +33,7 @@ def entry_json(e):
     it = e.get("i") or {}
     return {"start": e["s"], "end": e["s"] + e["d"], "kind": e["k"], "title": title, "subtitle": sub,
             "overview": it.get("overview", ""), "image": f"/img/{it['image_id']}.jpg" if it.get("image_id") else None,
-            "type": it.get("type"), "rating": it.get("rating", ""), "year": it.get("year")}
+            "type": it.get("type"), "rating": it.get("rating", ""), "year": it.get("year"), "slot": e.get("slot")}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -769,6 +769,18 @@ class Handler(BaseHTTPRequestHandler):
             skipped = sched.skip(ch)
             app.sessions.reload(cid)
             return self.json(dict(self.channel_summary(store.channel(cid)), skipped=skipped))
+        if action == "slots" and method == "GET":         # time slots: what each found, and its next airings
+            if ch.get("type") in ("guide", "weather"):
+                return self.json([])
+            return self.json(sched.slots_info(ch))
+        m = re.fullmatch(r"slots/([^/]+)/next", action or "")
+        if m and method == "POST":                        # in-order slot: choose the next episode
+            sid, item = m.group(1), (self.body_json() or {}).get("id")
+            if not item or not any(s.get("id") == sid for s in ch.get("slots") or []):
+                return self.error(400, "unknown time slot or episode")
+            sched.slot_next(ch, sid, item)
+            app.sessions.reload(cid)
+            return self.json(sched.slots_info(ch))
         if action == "rebuild_now" and method == "POST":
             sched.rebuild_now(ch)
             app.sessions.reload(cid)
