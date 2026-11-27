@@ -752,6 +752,10 @@ class Handler(BaseHTTPRequestHandler):
                 store.update_channel(cid, {"header_logo": dict(hl, file="",
                                                                mode="station" if hl.get("mode") == "custom" else hl.get("mode"))})
                 return self.json({"ok": True})
+        if action == "breakdown" and method == "GET":
+            if ch.get("type") in ("guide", "weather"):
+                return self.json({"groups": []})
+            return self.json(sched.breakdown(ch))
         if action == "skip" and method == "POST":
             if ch.get("type") in ("guide", "weather"):
                 return self.error(400, "nothing to skip on this channel")

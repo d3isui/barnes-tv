@@ -70,6 +70,43 @@ def show_key(it):
     return "i:" + it["id"]
 
 
+def group_key(it):
+    """How shows are grouped for airtime balancing: each series on its own, all movies together, all other clips together."""
+    if it.get("type") == "Episode":
+        return show_key(it)
+    return "movies" if it.get("type") == "Movie" else "clips"
+
+
+def group_title(key, items):
+    if key == "movies":
+        return "Movies"
+    if key == "clips":
+        return "Videos & clips"
+    return items[0].get("title") or "Show"
+
+
+def balance_on(ch):
+    b = ch.get("balance") or {}
+    return int(b.get("strength") or 0) > 0 or any(abs(float(v) - 1) > 1e-6 for v in (b.get("weights") or {}).values())
+
+
+def target_shares(groups, balance):
+    """{group key: share of airtime 0..1}. groups = {key: total seconds}. Strength blends between the pool's own
+    proportions (0) and equal time for every show (100); then each show's multiplier is applied."""
+    b = balance or {}
+    a = max(0.0, min(1.0, float(b.get("strength") or 0) / 100))
+    weights = b.get("weights") or {}
+    total = sum(groups.values()) or 1
+    raw = {}
+    for k, secs in groups.items():
+        natural = secs / total
+        raw[k] = (natural ** (1 - a) if natural > 0 else 0) * max(0.0, float(weights.get(k, 1)))
+    s = sum(raw.values())
+    if s <= 0:
+        return {k: 1 / len(groups) for k in groups} if groups else {}
+    return {k: v / s for k, v in raw.items()}
+
+
 def spread_shuffle(items, rnd=random):
     """Shuffle so each show's items are spread evenly through the deck instead of clumping together.
     Returns ids in play order (first = plays first)."""
@@ -279,6 +316,8 @@ class ScheduleManager:
                 st["timeline"] = []
             st["deck"], st["recent"] = [], []
             st.pop("queued", None)
+            st.pop("passes", None)
+            st.pop("gdeck", None)
             st["hash"] = schedule_hash(ch)
             self._save_state(cid)
         return self.ensure(ch)
@@ -344,10 +383,83 @@ class ScheduleManager:
                     pass
 
     # ---------- picking ----------
+    def _pick_balanced(self, ch, st, pool):
+        """Airtime balancing: choose the show first (stride scheduling: each show is due again after airing for
+        its share of the time), then the next item of that show in the channel's order."""
+        groups = {}
+        for i in pool.items:
+            groups.setdefault(group_key(i), []).append(i)
+        shares = target_shares({k: sum(i["duration"] for i in v) for k, v in groups.items()}, ch.get("balance"))
+        live = [k for k in groups if shares.get(k, 0) > 0] or list(groups)
+        passes = st.setdefault("passes", {})
+        floor = min((passes[k] for k in live if k in passes), default=0.0)
+        for k in live:
+            passes.setdefault(k, floor + random.random() * 60)        # newcomers join at the front, a little shuffled
+        for k in list(passes):
+            if k not in groups:
+                del passes[k]
+        last = st.get("last_show")
+        no_repeat = ch.get("no_repeat_show", True)
+        cand = [k for k in live if not (no_repeat and last and k == last)] or live
+        key = min(cand, key=lambda k: passes[k])
+        members = groups[key]
+        order = ch.get("order", "shuffle")
+        recent = st["recent"]
+        if order == "sequential" or (order == "series_rotation" and key.startswith("s:")):
+            eps = sorted(members, key=sort_key)
+            pos = st["cursor"].get(key, 0) % len(eps)
+            it = eps[pos]
+            st["cursor"][key] = pos + 1
+        elif order == "random":
+            ids = {i["id"] for i in members}
+            mine = [r for r in recent if r in ids][-min(len(members) - 1, 20):] if len(members) > 1 else []
+            fresh = [i for i in members if i["id"] not in mine] or members
+            it = random.choice(fresh)
+        else:   # shuffle (and movies in the other orders): every item of the show once before any repeats
+            decks = st.setdefault("gdeck", {})
+            deck = [d for d in decks.get(key, []) if d in pool.by_id]
+            if not deck:
+                deck = [i["id"] for i in members]
+                random.shuffle(deck)
+            it = pool.by_id[deck.pop()]
+            decks[key] = deck
+        passes[key] += max(60.0, it["duration"]) / max(shares.get(key, 0), 1e-4)
+        recent.append(it["id"])
+        del recent[:-50]
+        st["last_show"] = show_key(it) if key.startswith("s:") else key
+        return it
+
+    def breakdown(self, ch):
+        """What the channel's pool is made of, per show: items, hours, share of the pool, the share of airtime the
+        balancing aims for, and what the schedule actually holds for the next few days."""
+        pool = self.pool(ch)
+        groups = {}
+        for i in pool.items:
+            groups.setdefault(group_key(i), []).append(i)
+        secs = {k: sum(i["duration"] for i in v) for k, v in groups.items()}
+        total_s, total_n = sum(secs.values()) or 1, sum(len(v) for v in groups.values()) or 1
+        target = target_shares(secs, ch.get("balance")) if balance_on(ch) else {k: v / total_s for k, v in secs.items()}
+        aired, now = {}, time.time()
+        for e in self.ensure(ch):
+            if e["k"] == "program" and e.get("i") and e["s"] + e["d"] > now:
+                k = group_key(e["i"])
+                aired[k] = aired.get(k, 0) + e["d"]
+        aired_total = sum(aired.values()) or 1
+        out = [{"key": k, "title": group_title(k, v), "items": len(v), "seconds": round(secs[k]),
+                "share_items": len(v) / total_n, "share_time": secs[k] / total_s, "target": target.get(k, 0),
+                "scheduled": aired.get(k, 0) / aired_total,
+                "weight": float(((ch.get("balance") or {}).get("weights") or {}).get(k, 1))}
+               for k, v in groups.items()]
+        out.sort(key=lambda g: -g["seconds"])
+        return {"groups": out, "balanced": balance_on(ch), "strength": int((ch.get("balance") or {}).get("strength") or 0),
+                "scheduled_hours": round(aired_total / 3600, 1) if aired else 0}
+
     def _pick(self, ch, st, pool):
         items = pool.items
         if not items:
             return None
+        if balance_on(ch):
+            return self._pick_balanced(ch, st, pool)
         order = ch.get("order", "shuffle")
         recent = st["recent"]
         last = st.get("last_show")
@@ -565,6 +677,8 @@ class ScheduleManager:
                 st["timeline"] = keep_through_current(st["timeline"], now)
                 st["deck"], st["recent"], st["cursor"], st["seq"] = [], [], {}, 0
                 st.pop("queued", None)
+                st.pop("passes", None)
+                st.pop("gdeck", None)
                 st["hash"] = h
             tl = st["timeline"]
             tl[:] = [e for e in tl if e["s"] + e["d"] > now - KEEP_PAST]

@@ -38,7 +38,7 @@ that already comes with Jellyfin.
 |---|---|
 | <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Building a channel: sources, logo, clock, breaks and a live preview.</sub> |
 | <img src="docs/screenshots/admin-commercials.png" alt="Commercial compilation review"><br><sub>Long commercial compilations are split into separate ads automatically.</sub> | <img src="docs/screenshots/admin-bumpers.png" alt="Bumper library"><br><sub>60+ built-in bumpers, including ones that quote the weather.</sub> |
-| <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | |
+| <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | <img src="docs/screenshots/admin-balance.png" alt="Channel pool breakdown"><br><sub>What each channel is made of, with optional airtime balancing per show.</sub> |
 
 <sub>Screenshots use a demo library of made-up shows. The demo's weather map is a simplified drawing, not real map tiles.</sub>
 
@@ -58,6 +58,10 @@ that already comes with Jellyfin.
   takes turns between shows (each show's episodes still in order). With one big show and one tiny one, the tiny
   one will rerun more often to keep them apart. Untick **Never play the same show twice in a row** on a channel to
   turn this off.
+- **See what a channel is made of, and balance it.** Each channel's page has a pie chart of its pool, by number of
+  items or by hours, plus the airtime each show is set to get and what's actually scheduled. Balancing is off by
+  default. You can slide **Even out the shows** toward equal time so a 300-episode show doesn't drown out a
+  10-episode one, or give single shows more or less time with their own sliders.
 - **Real TV timing.** Programs can start back-to-back, or on the hour, half hour or quarter hour. The gaps are filled
   with your own filler (commercials, music videos, shorts) and then an "Up Next" card.
 - **Commercial breaks.** Shows pause every few minutes (you choose how often and how long) for spots from your own
@@ -172,6 +176,25 @@ IP. You can pin that address under **Settings → Address Jellyfin uses to reach
 
 **Tip:** a "Commercials" or "Bumpers" library makes the half-hour padding feel just like real TV. Add a library of
 short clips in Jellyfin (Home Videos type works well), then pick it under **Filler for the gaps**.
+
+### Balancing shows
+
+A channel plays every episode and movie in its pool once before repeating, so its airtime follows the size of each
+show: if one show has 300 episodes and another has 10, the big one gets most of the time. The **What's on this
+channel** card shows this as a pie chart. Use **Items**, **Hours**, **Airtime goal** or **Scheduled** to switch what
+the chart shows.
+
+- **Even out the shows** is off by default (0%). At 100%, every show gets the same airtime. In between, big shows
+  still get more time, just less of a lead.
+- Each show also has a **weight** slider, from ×0.25 to ×4, to fine-tune a single show. All movies count as one
+  "show", and so do all other clips.
+- When balancing gives a small show a lot of airtime, it repeats more often. The table warns you when a show will
+  run through all of its episodes in under two days.
+- With **Never play the same show twice in a row** on, no show can air more than every other slot, so a goal above
+  about 50% can't be met. The card tells you when that happens.
+
+Saving rebuilds the schedule, starting after whatever is on now. Turn the slider back to Off, or click **Reset balancing**, to
+return to the original behavior.
 
 ### Commercial breaks
 

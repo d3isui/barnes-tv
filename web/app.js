@@ -360,6 +360,17 @@ async function showChannel(id) {
       ${sourcePicker("fil", "Filler for the gaps", "When shows start on the hour/half hour, gaps are filled with these (commercials, music videos, shorts ≤ 15 min). Anything left over shows an “Up Next” card.")}
       <label class="f wide">Music under “Up Next” cards (file or folder on the Broadcast server, optional)<input type="text" id="music_path" value="${esc(ch.music_path || "")}"></label>
     </div></div>
+    <div class="card" id="poolcard"><h2>📊 What's on this channel</h2>
+      <div class="row"><div class="seg" id="pool_mode">${[["items", "Items"], ["hours", "Hours"], ["plan", "Airtime goal"], ["sched", "Scheduled"]]
+        .map(([k, l]) => `<button class="btn small" data-pm="${k}">${l}</button>`).join("")}</div><span class="spacer"></span><span class="sub" id="pool_total">Loading…</span></div>
+      <div class="poolwrap"><svg id="pool_pie" viewBox="-110 -110 220 220" aria-label="Pool breakdown"></svg><div id="pool_legend"></div></div>
+      <h3>Balance the airtime</h3>
+      <p class="sub" style="margin-top:0">Off by default: every episode and movie gets its turn, so a show with 300 episodes airs far more than one with 10.
+        Slide right to even things out, or give single shows more or less time with their own sliders. Saving rebuilds the schedule after what's on now.</p>
+      <div class="form"><label class="f wide">Even out the shows: <b id="bal_val"></b>
+        <input type="range" id="bal_strength" min="0" max="100" step="5" value="${+((ch.balance || {}).strength) || 0}">
+        <span class="row sub" style="justify-content:space-between"><span>Off (as the pool is)</span><span>Equal time for every show</span></span></label></div>
+      <div class="row"><button class="btn small" id="bal_reset">Reset balancing</button><span class="sub" id="bal_note"></span></div></div>
     <div class="card"><h2>Subtitles</h2>
       <div class="form">
         <label class="f wide">Show subtitles<select id="sub_mode">${[["off", "Off"], ["always", "Always, when the show has them"],
@@ -529,6 +540,7 @@ async function showChannel(id) {
       item_types: $$("[data-itype]").filter((x) => x.checked).map((x) => x.dataset.itype),
       include_specials: $("#include_specials").checked, min_minutes: +$("#min_minutes").value || 0,
       max_minutes: +$("#max_minutes").value || 0, order: $("#order").value, no_repeat_show: $("#no_repeat_show").checked,
+      balance: poolBalance(),
       padding_minutes: +$("#padding_minutes").value,
       audio_language: $("#audio_language").value, normalize_audio: $("#normalize_audio").checked,
       subtitles: { mode: $("#sub_mode").value, language: $("#sub_lang").value, size: $("#sub_size").value, font: $("#sub_font").value,
@@ -562,7 +574,7 @@ async function showChannel(id) {
 loadStatus();
     return d;
   };
-  $("#save").onclick = async () => { try { await save(); loadSchedule(); } catch (e) { toast(e.message, true); } };
+  $("#save").onclick = async () => { try { await save(); loadSchedule(); setTimeout(() => loadPool && loadPool(), 1500); } catch (e) { toast(e.message, true); } };
   $("#castbtn").onclick = () => castDialog(ch.id, `${ch.number} ${ch.name}`);
   if ($("#sub_check")) $("#sub_check").onclick = async () => {
     $("#sub_result").textContent = "Checking…";
@@ -726,6 +738,75 @@ loadStatus();
     if (busy.length || d.refreshing) setTimeout(loadComp, 3000);
   }
   if (!guide) loadComp();
+  // ---- pool breakdown & airtime balancing
+  const PIE = ["#ffb000", "#4f8cff", "#ff5d73", "#34d399", "#a78bfa", "#f97316", "#22d3ee", "#e879f9", "#a3e635", "#fb7185", "#60a5fa", "#fbbf24"];
+  let POOL = null, poolMode = "hours";
+  const balW = { ...(((ch.balance || {}).weights) || {}) };
+  function poolBalance() { const w = {}; for (const [k, v] of Object.entries(balW)) if (Math.abs(v - 1) > 1e-6) w[k] = v; return { strength: +($("#bal_strength")?.value || 0), weights: w }; }
+  const balanced = () => { const b = poolBalance(); return b.strength > 0 || Object.keys(b.weights).length > 0; };
+  function planShares(groups) {       // same maths as the server (scheduler.target_shares)
+    const b = poolBalance(), a = b.strength / 100, total = groups.reduce((s, g) => s + g.seconds, 0) || 1;
+    const raw = groups.map((g) => { const n = g.seconds / total; return (n > 0 ? n ** (1 - a) : 0) * (b.weights[g.key] ?? 1); });
+    const sum = raw.reduce((s, v) => s + v, 0) || 1;
+    return raw.map((v) => v / sum);
+  }
+  const fmtH = (s) => s >= 3600 ? (s / 3600).toFixed(s >= 36000 ? 0 : 1) + " h" : Math.round(s / 60) + " min";
+  const wLabel = (m) => "×" + (+m.toFixed(2));
+  function drawPool() {
+    if (!POOL || !$("#pool_pie")) return;
+    const G = POOL.groups;
+    $$("[data-pm]").forEach((b) => b.classList.toggle("primary", b.dataset.pm === poolMode));
+    $("#bal_val").textContent = +$("#bal_strength").value ? $("#bal_strength").value + "%" : "off";
+    if (!G.length) { $("#pool_total").textContent = "Nothing in the pool yet: add some sources and save."; $("#pool_pie").innerHTML = ""; $("#pool_legend").innerHTML = ""; return; }
+    const plan = planShares(G), totalS = G.reduce((s, g) => s + g.seconds, 0), totalN = G.reduce((s, g) => s + g.items, 0);
+    const val = (g, i) => poolMode === "items" ? g.share_items : poolMode === "hours" ? g.share_time : poolMode === "plan" ? (balanced() ? plan[i] : g.share_time) : g.scheduled;
+    $("#pool_total").textContent = poolMode === "items" ? `${totalN} items in ${G.length} show${G.length > 1 ? "s" : ""}` :
+      poolMode === "hours" ? `${fmtH(totalS)} of programmes` : poolMode === "plan" ? (balanced() ? "the airtime each show will get" : "balancing is off: airtime follows the pool")
+      : POOL.scheduled_hours ? `what's actually scheduled in the next ${POOL.scheduled_hours} h` : "nothing scheduled yet";
+    // pie (slices under 2% are drawn together)
+    let a0 = -Math.PI / 2, paths = "", other = 0;
+    const arc = (v, color, title) => {
+      if (v <= 0) return;
+      if (v >= 0.9999) { paths += `<circle r="100" fill="${color}"><title>${esc(title)}</title></circle>`; return; }
+      const a1 = a0 + v * 2 * Math.PI, large = v > 0.5 ? 1 : 0;
+      paths += `<path d="M0 0 L${100 * Math.cos(a0)} ${100 * Math.sin(a0)} A100 100 0 ${large} 1 ${100 * Math.cos(a1)} ${100 * Math.sin(a1)} Z" fill="${color}"><title>${esc(title)} · ${(v * 100).toFixed(1)}%</title></path>`;
+      a0 = a1;
+    };
+    G.forEach((g, i) => { const v = val(g, i); if (v < 0.02) other += v; else arc(v, PIE[i % PIE.length], g.title); });
+    arc(other, "#6b7280", "Others");
+    $("#pool_pie").innerHTML = paths + `<circle r="52" fill="var(--panel, #111)"/>`;
+    $("#pool_legend").innerHTML = `<table class="pooltab"><tr><th></th><th>Show</th><th>Items</th><th>Hours</th><th>%</th><th title="More or less airtime for this show, on top of the balancing above">Weight</th></tr>${G.map((g, i) => {
+      const m = balW[g.key] ?? 1, share = plan[i], back = balanced() && share > 0 ? g.seconds / share / 86400 : null;
+      return `<tr><td><i class="dot" style="background:${val(g, i) < 0.02 ? "#6b7280" : PIE[i % PIE.length]}"></i></td><td class="t" title="${esc(g.title)}">${esc(g.title)}</td>
+        <td>${g.items}</td><td>${fmtH(g.seconds)}</td><td><b>${(val(g, i) * 100).toFixed(val(g, i) < 0.1 ? 1 : 0)}%</b></td>
+        <td class="w"><span class="wr"><input type="range" min="-2" max="2" step="0.25" value="${Math.log2(m)}" data-bw="${esc(g.key)}" aria-label="Weight for ${esc(g.title)}"><span>${wLabel(m)}</span></span>
+        ${back !== null && back < 2 ? `<small class="warn" title="With this much airtime every episode has aired and the show starts over about this often">all of it every ${back < 1 ? Math.max(1, Math.round(back * 24)) + " h" : back.toFixed(1) + " days"}</small>` : ""}</td></tr>`;
+    }).join("")}</table>${noRepeatCap(plan)}`;
+    $$("[data-bw]").forEach((r) => (r.oninput = () => {
+      balW[r.dataset.bw] = 2 ** +r.value;
+      r.nextElementSibling.textContent = wLabel(balW[r.dataset.bw]);
+      if (poolMode !== "plan") poolMode = "plan";
+      drawPool(); markDirty();
+    }));
+    $("#bal_note").textContent = balanced() ? "Balancing is on." : "Balancing is off (the channel plays the pool as it is).";
+  }
+  function noRepeatCap(plan) {    // "never twice in a row" means one show can't fill more than every other slot
+    if (!$("#no_repeat_show").checked || POOL.groups.length < 2 || !["plan", "sched"].includes(poolMode)) return "";
+    const i = plan.findIndex((v) => v > 0.52);
+    if (i < 0 || !(balanced() || poolMode === "sched")) return "";
+    return `<p class="sub warn">${esc(POOL.groups[i].title)} is set for ${Math.round(plan[i] * 100)}%, but with “Never play the same show twice in a row” on it can only air every other slot (about half the time, depending on running times).</p>`;
+  }
+  async function loadPool() {
+    if (guide || !$("#pool_pie")) return;
+    try { POOL = await api("GET", `channels/${ch.id}/breakdown`); } catch (e) { $("#pool_total").textContent = e.message; return; }
+    drawPool();
+  }
+  if (!guide) {
+    $$("[data-pm]").forEach((b) => (b.onclick = () => { poolMode = b.dataset.pm; drawPool(); }));
+    $("#bal_strength").addEventListener("input", () => { poolMode = "plan"; drawPool(); });
+    $("#bal_reset").onclick = () => { $("#bal_strength").value = 0; for (const k of Object.keys(balW)) delete balW[k]; poolMode = "hours"; drawPool(); markDirty(); };
+    loadPool();
+  }
   async function loadSchedule() {
     if (guide) return;
     try {

@@ -114,6 +114,9 @@ CHANNEL_DEFAULT = {
     "max_minutes": 0,
     "order": "shuffle",              # shuffle | series_rotation | sequential | random
     "no_repeat_show": True,          # never the same show twice in a row (when there's anything else to play)
+    # share of airtime per show (off by default: every episode/movie gets its fair turn, so big shows air more)
+    "balance": {"strength": 0,       # 0 = as the pool is, 100 = every show gets the same airtime
+                "weights": {}},      # per-show fine tuning: {group key: multiplier, 1 = normal}
     "padding_minutes": 0,            # 0 = back-to-back, otherwise start programs on :00/:15/:30 boundaries
     "filler_sources": [],            # commercials / music videos / shorts used to fill gaps
     "audio_language": "",            # ISO 639-2, e.g. "jpn", "eng"
@@ -148,8 +151,25 @@ CHANNEL_DEFAULT = {
     "guide_display_font": "theme",   # guide channel only: clock / channel numbers font
 }
 
+def clean_balance(b):
+    b = b if isinstance(b, dict) else {}
+    try:
+        strength = max(0, min(100, int(round(float(b.get("strength") or 0)))))
+    except (TypeError, ValueError):
+        strength = 0
+    weights = {}
+    for k, v in (b.get("weights") or {}).items() if isinstance(b.get("weights"), dict) else ():
+        try:
+            v = max(0.0, min(8.0, float(v)))
+        except (TypeError, ValueError):
+            continue
+        if abs(v - 1) > 1e-6:
+            weights[str(k)[:200]] = round(v, 4)
+    return {"strength": strength, "weights": weights}
+
+
 SCHEDULE_KEYS = ("sources", "exclude", "item_types", "include_specials", "min_minutes", "no_repeat_show",
-                 "max_minutes", "order", "padding_minutes", "filler_sources", "type", "breaks", "bumpers")
+                 "max_minutes", "order", "padding_minutes", "filler_sources", "type", "breaks", "bumpers", "balance")
 
 # A bumper can be limited to a time of day (checked when it's scheduled) or to the current weather (checked when
 # it airs, from the weather channel's forecast).
@@ -371,6 +391,8 @@ class Store:
                     for k, v in data.items():
                         if isinstance(v, list):
                             self._channels[i][k] = v
+                    if "balance" in data:       # replaced whole, so a show set back to "normal" really goes back
+                        self._channels[i]["balance"] = clean_balance(data["balance"])
                     self.save()
                     return copy.deepcopy(self._channels[i])
         return None
