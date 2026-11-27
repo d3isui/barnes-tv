@@ -3,9 +3,9 @@
   <img src="docs/wordmark-light-mode.png" alt="Barnes Television Broadcasting System" width="460">
 </picture></p>
 
-# Barnes Television Broadcasting System 📺
+# Barnes Television Broadcasting Service 📺
 
-Barnes Television Broadcasting System turns your Jellyfin library into **24/7 cable-style TV channels** that run on your own server. You
+Barnes Television Broadcasting Service (BTBS) turns your Jellyfin library into **24/7 cable-style TV channels** that run on your own server. You
 make channels such as Cartoons, Japanese TV, Movies or Sitcoms. Each one has a real schedule, so when you tune in you
 land in the middle of whatever is "on" now. Each channel can also show a **logo in the corner you pick** and an
 **on-screen clock**. There is a **scrolling guide channel** like the old cable guide channels.
