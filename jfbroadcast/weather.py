@@ -150,8 +150,8 @@ def resolve_location(cfg):
             loc = {"name": d.get("city") or "", "region": d.get("region") or d.get("regionName") or "",
                    "country": (d.get("countryCode") or "").upper(), "lat": float(d["lat"]), "lon": float(d["lon"]),
                    "source": "your internet connection"}
-    if name:
-        loc["name"] = name
+    if name:                         # the name you typed is shown exactly as typed (no ", IL" added to "Chicago, IL")
+        loc["name"], loc["region"] = name, ""
     return loc
 
 
@@ -443,7 +443,7 @@ class WeatherService:
 
     def _loc_key(self, cfg):
         lc = cfg.get("location") or {}
-        return json.dumps({k: lc.get(k) for k in ("mode", "zip", "country", "query", "lat", "lon", "name")}, sort_keys=True)
+        return json.dumps(dict({k: lc.get(k) for k in ("mode", "zip", "country", "query", "lat", "lon", "name")}, v=2), sort_keys=True)
 
     def location(self, ch, wait=False):
         """(location dict or None, error text)."""

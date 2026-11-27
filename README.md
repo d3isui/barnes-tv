@@ -1,4 +1,7 @@
-<p align="center"><img src="web/brand/barnes-wordmark.png" alt="Barnes Television Broadcasting System" width="460"></p>
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/brand/barnes-wordmark.png">
+  <img src="docs/wordmark-light-mode.png" alt="Barnes Television Broadcasting System" width="460">
+</picture></p>
 
 # Barnes Television Broadcasting System 📺
 
@@ -12,6 +15,32 @@ You can also surf them in a browser at `http://<server>:8420/tv`.
 
 It's a small companion app that runs next to Jellyfin. It works on **Windows and Linux**, and it can use the ffmpeg
 that already comes with Jellyfin.
+
+---
+
+## Screenshots
+
+<p align="center"><img src="docs/screenshots/guide-channel.jpg" alt="The scrolling guide channel" width="860"><br>
+<sub><b>The guide channel</b>: a scrolling, cable-style listing of every channel with a "now on" spotlight.</sub></p>
+
+| | |
+|---|---|
+| <img src="docs/screenshots/tv-watching.jpg" alt="Watching a channel"><br><sub><b>Watching</b> in a browser or the TV app: channel bug, clock and the now/next banner.</sub> | <img src="docs/screenshots/tv-guide.jpg" alt="The on-screen guide"><br><sub><b>The on-screen guide</b>: what's on now and next on every channel, driven by the TV remote.</sub> |
+| <img src="docs/screenshots/weather-radar.jpg" alt="Weather channel radar"><br><sub><b>The weather channel</b>: local radar looping over a street map, with a crawl along the bottom.</sub> | <img src="docs/screenshots/weather-forecast.jpg" alt="Weather channel 7-day forecast"><br><sub>Current conditions, the next 12 hours, a 7-day forecast, sun &amp; moon and weather alerts.</sub> |
+| <img src="docs/screenshots/weather-future-radar.jpg" alt="Future radar"><br><sub><b>Future radar</b> (US): the next three hours of forecast radar.</sub> | <img src="docs/screenshots/upnext-and-bumper.jpg" alt="Up Next card and a bumper"><br><sub><b>"Up Next" cards and bumpers</b> between shows and around commercial breaks.</sub> |
+
+<p align="center"><img src="docs/screenshots/themes.jpg" alt="Eight of the built-in themes" width="860"><br>
+<sub><b>Themes</b>: the same guide in eight of the built-in looks. Or build your own.</sub></p>
+
+**Admin page**
+
+| | |
+|---|---|
+| <img src="docs/screenshots/admin-channels.png" alt="Channel list"><br><sub>Every channel at a glance, with what's on now.</sub> | <img src="docs/screenshots/admin-channel.png" alt="Channel editor"><br><sub>Building a channel: sources, logo, clock, breaks and a live preview.</sub> |
+| <img src="docs/screenshots/admin-commercials.png" alt="Commercial compilation review"><br><sub>Long commercial compilations are split into separate ads automatically.</sub> | <img src="docs/screenshots/admin-bumpers.png" alt="Bumper library"><br><sub>60+ built-in bumpers, including ones that quote the weather.</sub> |
+| <img src="docs/screenshots/admin-branding.png" alt="Branding"><br><sub>Rebrand everything with your own station name and logos.</sub> | |
+
+<sub>Screenshots use a demo library of made-up shows. The demo's weather map is a simplified drawing, not real map tiles.</sub>
 
 ---
 
