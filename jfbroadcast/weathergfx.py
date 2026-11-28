@@ -163,7 +163,8 @@ class WeatherRenderer:
         s = self.s
         self.panel_box = (int(40 * s), int(104 * s), int(W - 40 * s), int(616 * s))
         self.crawl_y = int(669 * s)               # centre line of the crawl (drawn by ffmpeg)
-        self.crawl_band = (int(640 * s) + max(2, int(3 * s)), int(698 * s))
+        # starts just under the accent line (drawn inclusive from 640 to 640 + 3 in _frame), so nothing covers it
+        self.crawl_band = (int(640 * s) + max(2, int(3 * s)) + 1, int(698 * s))
         self.map_size = (int(self.panel_box[2] - self.panel_box[0] - 24 * s), int(self.panel_box[3] - self.panel_box[1] - 72 * s))
 
     # ---- helpers

@@ -357,10 +357,25 @@ class Builder:
             if band:      # cover the crawl where it slides off to the left, under the label
                 chain.append(f"drawbox=x=0:y={band[0]}:w={crawl_x0}:h={band[1] - band[0]}:color={band_color}:t=fill")
             if label:
+                # the label's box is drawn to fit inside the crawl band (a box around the text could poke out of
+                # the band with tall fonts and cover the line above it)
+                try:
+                    from PIL import ImageFont
+                    tw = ImageFont.truetype(crawl_font, crawl_size).getlength(label)
+                except Exception:
+                    tw = len(label) * crawl_size * 0.6
+                pad = max(6, crawl_size // 2)
+                bx1 = int(crawl_x0 - crawl_size * 0.1)
+                bx0 = int(bx1 - tw - 2 * pad)
+                if band:
+                    inset = max(3, int((band[1] - band[0]) * 0.12))
+                    by0, by1 = band[0] + inset, band[1] - inset
+                else:
+                    by0, by1 = int(crawl_y - crawl_size * 0.9), int(crawl_y + crawl_size * 0.9)
+                chain.append(f"drawbox=x={bx0}:y={by0}:w={bx1 - bx0}:h={by1 - by0}:color={label_box}:t=fill")
                 chain.append(
                     f"drawtext=fontfile={esc(crawl_font)}:text={esc(label)}:expansion=none:fontsize={crawl_size}"
-                    f":fontcolor={label_color}:x={int(crawl_x0 - crawl_size * 0.6)}-tw:y={crawl_y}-th/2"
-                    f":box=1:boxcolor={label_box}:boxborderw={max(6, crawl_size // 2)}")
+                    f":fontcolor={label_color}:x={bx0 + pad}:y={(by0 + by1) // 2}-th/2")
         v = "[0:v]" + ",".join(chain) + f",scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,{TAGS}{vtail}[v]"
         a = f"[1:a]aresample=48000:async=1{music_af},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]"
         cmd += ["-filter_complex", v + ";" + a, "-map", "[v]", "-map", "[a]"] + venc + [
