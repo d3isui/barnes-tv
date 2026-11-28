@@ -21,7 +21,7 @@ goto :run
 :essentials
 echo.
 echo Some optional packages could not be installed. Installing the essentials only.
-echo Casting to Chromecast may be unavailable - see README, Troubleshooting.
+echo Casting to Chromecast may be unavailable - see GUIDE.md, Troubleshooting.
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q "Pillow>=10.1" || goto :pipfail
 :run
 ".venv\Scripts\python.exe" broadcast.py %*

@@ -181,7 +181,7 @@ class CastManager:
         if not reached and age > 20:
             return {"status": "unreachable", "message":
                     f"The TV never requested the stream from {self.base_url()}. It can't reach this computer: "
-                    "allow port %d through the firewall (see README → Casting) and make sure that address is "
+                    "allow port %d through the firewall (see GUIDE.md → Casting to a Chromecast) and make sure that address is "
                     "this machine's network IP." % self.app.port}
         if reached and age > 40:
             return {"status": "error", "message": "The TV downloaded the stream but didn't start playing. "

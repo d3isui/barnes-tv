@@ -924,7 +924,7 @@ class Handler(BaseHTTPRequestHandler):
               f'<p>Short link to type on the TV: <code>{base}/app.apk</code></p>') if has_apk else (
               '<p class="warn">The app file isn\'t in this copy yet. Build it from the <code>android-tv</code> folder '
               '(open it in Android Studio and choose <b>Build → Build APK(s)</b>), then copy the APK to '
-              '<code>web/app/BarnesTV.apk</code>. See README → “TV app”.</p>')
+              '<code>web/app/BarnesTV.apk</code>. See GUIDE.md → “TV app for Google TV and Android TV”.</p>')
         return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{short} app</title><link rel="icon" href="/favicon.png"><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/theme.css"></head>
 <body><main><h1>📺 {short} for Google TV &amp; Android TV</h1><div class="card stack">
