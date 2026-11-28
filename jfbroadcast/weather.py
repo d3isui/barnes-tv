@@ -40,6 +40,8 @@ URLS = {
     "basemap": "https://basemaps.cartocdn.com/rastertiles/{style}/{z}/{x}/{y}{scale}.png?key={key}",
     # US: NOAA NEXRAD mosaic and NOAA HRRR forecast reflectivity, served as map tiles by the Iowa Environmental Mesonet
     "iem_tile": "https://mesonet.agron.iastate.edu/c/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png",
+    # the HRRR layers are only served from IEM's short-cache endpoint (/cache/...), not the long-cache one (/c/...)
+    "iem_tile_hrrr": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png",
     "hrrr_meta": "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json",
 }
 if os.environ.get("BTV_WEATHER_MOCK"):          # testing only: send every request to a local mock server
@@ -47,7 +49,8 @@ if os.environ.get("BTV_WEATHER_MOCK"):          # testing only: send every reque
     URLS = {"ipwho": _m + "/ipwho", "ipapi": _m + "/ipapi", "zip": _m + "/zip/{country}/{zip}",
             "geocode": _m + "/geocode?name={q}", "forecast": _m + "/forecast", "alerts": _m + "/alerts?point={lat:.4f},{lon:.4f}",
             "radar": _m + "/radar", "basemap": _m + "/basemap/{style}/{z}/{x}/{y}{scale}.png?key={key}",
-            "iem_tile": _m + "/iem/{layer}/{z}/{x}/{y}.png", "hrrr_meta": _m + "/hrrr_meta"}
+            "iem_tile": _m + "/iem/{layer}/{z}/{x}/{y}.png", "iem_tile_hrrr": _m + "/iem/{layer}/{z}/{x}/{y}.png",
+            "hrrr_meta": _m + "/hrrr_meta"}
 FORECAST_EVERY = 600          # seconds between forecast refreshes
 RADAR_EVERY = 300             # the US mosaic updates every 5 minutes; tiles already fetched are reused
 RADAR_RETRY = 90              # after a failed refresh
@@ -486,7 +489,7 @@ def future_frames(loc, n, step_min=30, now=None):
         if f >= 0:
             layer = f"hrrr::REFD-F{f:04d}-{_utc(init)}"
             out.append({"time": init + f * 60, "kind": "future", "key": layer, "source": "hrrr", "gap": 0.05,
-                        "url": URLS["iem_tile"].replace("{layer}", layer)})
+                        "url": URLS["iem_tile_hrrr"].replace("{layer}", layer)})
         t += step_min * 60
     return out
 
@@ -682,6 +685,9 @@ class WeatherService:
                     st["radar"][name] = {"base": base, "frames": frames, "zoom": z, "size": (w, h), "min_dbz": min_dbz,
                                          "base_size": (w, h, style), "fetched": time.time()}
                 frames = sorted(got.values(), key=lambda f: f[0])
+                if name == "future":
+                    st["errors"]["future"] = "" if frames or not wanted else \
+                        "the forecast radar service didn't send any images, so the Future radar screen is skipped for now"
                 if not frames and wanted:
                     ok = False
                     # nothing new came back: keep older frames only while they're still recent

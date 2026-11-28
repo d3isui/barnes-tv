@@ -927,6 +927,9 @@ viewer tunes in ──► session: one ffmpeg per program (seeks to the right sp
   installed by `start.bat`, and by `install-windows-startup.ps1` each time you run it.
 - **Weather not updating**: the Weather tab's **📍 Check location & weather** shows the last error for the forecast,
   alerts and radar.
+- **A weather screen is missing**: **Weather alerts** only shows while an alert is active, and **Future radar** is
+  skipped outside the US or while the forecast radar service sends no images. **📍 Check location & weather** says
+  which.
 - **Jellyfin can't load the M3U or the guide**: from the Jellyfin machine, check that
   `http://<broadcast-server>:8420/iptv/channels.m3u` opens in a browser. If it doesn't, check the firewall and the
   "Address Jellyfin uses" setting.
