@@ -37,7 +37,13 @@ Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 Write-Host "Installing / updating Python packages..."
 & (Join-Path $Root ".venv\Scripts\python.exe") -m pip install --disable-pip-version-check -q -r (Join-Path $Root "requirements.txt")
-if ($LASTEXITCODE -ne 0) { Write-Host "Some packages couldn't be installed (check your internet connection); continuing." -ForegroundColor Yellow }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Some packages couldn't be installed together; trying them one at a time..." -ForegroundColor Yellow
+    foreach ($pkg in (Get-Content (Join-Path $Root "requirements.txt") | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") })) {
+        & (Join-Path $Root ".venv\Scripts\python.exe") -m pip install --disable-pip-version-check -q $pkg.Trim()
+        if ($LASTEXITCODE -ne 0) { Write-Host "  couldn't install $pkg (the app runs without it)" -ForegroundColor Yellow }
+    }
+}
 
 Unregister-ScheduledTask -TaskName $OldName -Confirm:$false -ErrorAction SilentlyContinue
 $action = New-ScheduledTaskAction -Execute $Py -Argument "`"$Root\broadcast.py`" --port $Port" -WorkingDirectory $Root

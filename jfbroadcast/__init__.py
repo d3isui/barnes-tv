@@ -2,4 +2,4 @@
 
 BRAND = "Barnes Television Broadcasting System"
 BRAND_SHORT = "Barnes TV"
-__version__ = "1.20.2"
+__version__ = "1.21.0"

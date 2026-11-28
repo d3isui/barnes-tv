@@ -94,7 +94,7 @@ async function copy(text) {
 }
 
 const SOURCE_TYPES = [["library", "Library"], ["genre", "Genre"], ["collection", "Collection"], ["series", "Series"],
-  ["playlist", "Playlist"], ["tag", "Tag"], ["studio", "Studio / Network"]];
+  ["playlist", "Playlist"], ["tag", "Tag"], ["studio", "Studio / Network"], ["youtube", "▶ YouTube link"]];
 const ORDERS = {
   shuffle: "Shuffle — everything plays once before anything repeats",
   series_rotation: "Rotate shows — random show each slot, episodes in order (classic reruns)",
@@ -287,18 +287,28 @@ function sourcePicker(id, title, help) {
       <select id="${id}-type">${SOURCE_TYPES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
       <input type="text" id="${id}-q" placeholder="Filter…" style="width:140px">
       <select id="${id}-list" class="big"><option value="">Choose…</option></select>
+      <input type="url" id="${id}-yt" class="big" placeholder="Paste a YouTube video, playlist or channel link" style="display:none">
       <button type="button" class="btn small" id="${id}-add">Add</button>
-    </div></div>`;
+    </div><div class="sub" id="${id}-ytnote" style="display:none;margin-top:4px"></div></div>`;
 }
 function wireSourcePicker(id, list, onChange = () => { }) {
   const chips = $(`#${id}-chips`), type = $(`#${id}-type`), q = $(`#${id}-q`), sel = $(`#${id}-list`);
+  const yt = $(`#${id}-yt`), ytnote = $(`#${id}-ytnote`);
   const draw = () => {
-    chips.innerHTML = list.length ? list.map((s, i) => `<span class="chip"><b>${esc(s.type)}</b>${esc(s.name)}<button type="button" data-i="${i}">×</button></span>`).join("")
+    chips.innerHTML = list.length ? list.map((s, i) => `<span class="chip" ${s.type === "youtube" ? `title="${esc(s.id)}"` : ""}><b>${s.type === "youtube" ? "▶ YouTube" : esc(s.type)}</b>${esc(s.name)}<button type="button" data-i="${i}">×</button></span>`).join("")
       : '<span class="sub">None</span>';
     $$("button", chips).forEach((b) => (b.onclick = () => { list.splice(+b.dataset.i, 1); draw(); onChange(); }));
   };
   let cache = {};
+  const ytMode = () => {
+    const on = type.value === "youtube";
+    q.style.display = sel.style.display = on ? "none" : ""; yt.style.display = on ? "" : "none";
+    ytnote.style.display = on ? "" : "none";
+    if (on && !ytnote.textContent) ytnote.textContent = "A video, a playlist or a whole channel (its newest 500 videos). They play straight from YouTube; nothing is downloaded.";
+    return on;
+  };
   const load = async () => {
+    if (ytMode()) return;
     const key = type.value + "|" + q.value;
     sel.innerHTML = "<option>Loading…</option>";
     try {
@@ -309,7 +319,24 @@ function wireSourcePicker(id, list, onChange = () => { }) {
   };
   type.onchange = load;
   let deb; q.oninput = () => { clearTimeout(deb); deb = setTimeout(load, 350); };
+  const addYouTube = async () => {
+    const url = yt.value.trim();
+    if (!url) return;
+    const btn = $(`#${id}-add`);
+    btn.disabled = true; ytnote.innerHTML = '<span class="spin"></span> Reading that from YouTube… (a big channel can take a minute)';
+    try {
+      const r = await api("GET", `youtube/inspect?url=${encodeURIComponent(url)}`);
+      if (!r.videos) throw new Error(r.skipped ? "Nothing playable there (live streams, upcoming premieres and private videos are left out)." : "No videos found there.");
+      const what = r.kind === "channel" ? "channel" : r.kind === "playlist" ? "playlist" : "video";
+      if (!list.some((s) => s.type === "youtube" && s.id === r.url)) list.push({ type: "youtube", id: r.url, name: r.kind === "video" ? r.title : `${r.title} (${what}, ${r.videos} videos)` });
+      ytnote.textContent = `✓ Added: ${r.title}: ${r.videos} video${r.videos === 1 ? "" : "s"}, ${r.hours} hours` + (r.skipped ? ` (${r.skipped} skipped: live, upcoming, private or deleted)` : "") + ".";
+      yt.value = ""; draw(); onChange();
+    } catch (e) { ytnote.textContent = "⚠ " + e.message; }
+    finally { btn.disabled = false; }
+  };
+  yt.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addYouTube(); } });
   $(`#${id}-add`).onclick = () => {
+    if (type.value === "youtube") return addYouTube();
     if (!sel.value) return;
     const name = sel.selectedOptions[0].text;
     if (!list.some((s) => s.type === type.value && s.id === sel.value)) list.push({ type: type.value, id: sel.value, name });
@@ -575,7 +602,7 @@ async function showChannel(id) {
     $("#save").classList.add("dirty");
     $("#unsaved").style.display = "";
   }
-  const pickerBits = /-(q|list|type)$/;
+  const pickerBits = /-(q|list|type|yt)$/;
   ["input", "change"].forEach((ev) => $(".editor").addEventListener(ev, (e) => {
     if (e.target.matches("input, select, textarea") && !pickerBits.test(e.target.id || "") && !e.target.closest("[data-nodirty]") &&
       !["logofile", "hlfile", "pv_slide"].includes(e.target.id)) {
@@ -1812,6 +1839,19 @@ async function showSettings() {
   </div><p class="sub">The street maps under the weather channel's radar come from CARTO, which needs a free key
     (<a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">get one here</a>; leave “website” blank so it works from this server).
     Changes apply at the next radar refresh, within 10 minutes.</p></div>
+  <div class="card"><h2>▶ YouTube</h2>
+    <p class="sub" style="margin-top:0">Add YouTube videos, playlists and whole channels to any channel: <b>Edit channel → Scheduling → What plays →
+      ▶ YouTube link</b>. They play straight from YouTube, nothing is downloaded, and they never include YouTube's ads.</p>
+    <div id="yt_status" class="sub">Checking…</div>
+    <h3>Sign in to YouTube (optional)</h3>
+    <p class="sub" style="margin-top:0">Needed for age-restricted, members-only and private videos and playlists, for YouTube Premium's higher-quality
+      streams, and when YouTube asks to "confirm you're not a bot". It works with a <b>cookies.txt</b> file from a browser that's signed in:
+      open a private/incognito window, sign in to youtube.com, export its cookies with a "cookies.txt" browser extension (for example
+      <i>Get cookies.txt LOCALLY</i>), then close that window without signing out. The file stays on this server and is only sent to YouTube.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><input type="file" id="yt_file" accept=".txt,text/plain" style="display:none">
+      <button class="btn" id="yt_up">Upload cookies.txt…</button><button class="btn" id="yt_rm">Remove sign-in</button>
+      <button class="btn" id="yt_test">Test playback</button><button class="btn" id="yt_update">Update YouTube support</button></div>
+    <div class="sub" id="yt_msg" style="margin-top:6px"></div></div>
   <div class="card"><h2>🧹 Maintenance</h2>
     <div class="row"><button class="btn danger" id="restart_server">↻ Restart server</button>
       <span class="sub" style="flex:1;min-width:260px">Stops every channel, stream and Chromecast connection and starts the server fresh, like closing and reopening it.
@@ -1846,6 +1886,37 @@ async function showSettings() {
   };
   $("#test").onclick = test;
   $("#restart_server").onclick = () => restartServer();
+  // ---- YouTube
+  const ytStatus = async () => {
+    try {
+      const y = await api("GET", "youtube/status");
+      $("#yt_status").innerHTML = (y.ytdlp ? `✅ yt-dlp ${esc(y.ytdlp)}` : "❌ yt-dlp isn't installed: run start.bat / start.sh again, or click Update YouTube support") +
+        " · " + (y.js_runtime ? `✅ ${esc(y.js_runtime)} (solves YouTube's video checks)` : "⚠ no JavaScript runtime (Deno), so some videos may not play: click Update YouTube support") +
+        " · " + (y.cookies ? "✅ signed in (cookies.txt)" : "not signed in") +
+        (y.update.running ? " · <span class='spin'></span> updating…" : y.update.message ? ` · last update: ${esc(y.update.message)}` : "");
+      $("#yt_rm").style.display = y.cookies ? "" : "none";
+      if (y.update.running) setTimeout(ytStatus, 3000);
+    } catch (e) { $("#yt_status").textContent = e.message; }
+  };
+  ytStatus();
+  $("#yt_up").onclick = () => $("#yt_file").click();
+  $("#yt_file").onchange = async () => {
+    const f = $("#yt_file").files[0]; if (!f) return;
+    try { const r = await api("POST", "youtube/cookies", undefined, f); $("#yt_msg").textContent = `✓ Signed in: ${r.cookies} YouTube cookies saved. Use "Test playback" to check.`; ytStatus(); }
+    catch (e) { $("#yt_msg").textContent = "⚠ " + e.message; }
+    $("#yt_file").value = "";
+  };
+  $("#yt_rm").onclick = async () => { if (!confirm("Remove the YouTube sign-in?")) return; await api("DELETE", "youtube/cookies"); $("#yt_msg").textContent = "Signed out."; ytStatus(); };
+  $("#yt_test").onclick = async () => {
+    const url = prompt("A YouTube video to test with (leave empty for YouTube's first-ever video):", "");
+    if (url === null) return;
+    $("#yt_msg").innerHTML = '<span class="spin"></span> Asking YouTube…';
+    try {
+      const r = await api("GET", "youtube/test" + (url.trim() ? `?url=${encodeURIComponent(url.trim())}` : ""));
+      $("#yt_msg").textContent = `✅ “${r.title}” can play: ${r.height ? r.height + "p" : "stream"} (format ${r.format}).`;
+    } catch (e) { $("#yt_msg").textContent = "❌ " + e.message; }
+  };
+  $("#yt_update").onclick = async () => { await api("POST", "youtube/update"); $("#yt_msg").textContent = "Updating yt-dlp and Deno in the background…"; ytStatus(); };
   $("#save").onclick = async () => {
     const d = collect();
     const c1 = $("#lock_new_code").value.trim(), c2 = $("#lock_new_code2").value.trim();

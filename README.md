@@ -25,6 +25,8 @@ ffmpeg that already comes with Jellyfin.
 **📅 Real TV scheduling**
 - Unlimited channels built from any mix of libraries, genres, collections, shows, playlists, tags or networks, with
   anything you want left out.
+- **YouTube too**: add a video, a playlist or a whole YouTube channel to any channel. It streams straight from
+  YouTube, with no downloads and no YouTube ads.
 - Shuffle, classic reruns, in order or pure random, and the same show never airs twice in a row.
 - Programs start on the hour or half hour if you like, with filler and "Up Next" cards in the gaps.
 - **Time slots** put a show on at set times ("The Simpsons, weeknights at 8"), picking up with the next episode.
@@ -117,6 +119,7 @@ Want it to start with Windows, survive power cuts, or reach your other devices t
 | Install it and connect it to Jellyfin | [Getting started](GUIDE.md#getting-started) |
 | Build channels: sources, order, start times | [Building a channel](GUIDE.md#building-a-channel) |
 | Put a show on at set times, or run a marathon | [Time slots](GUIDE.md#time-slots) · [Marathons](GUIDE.md#marathons) |
+| Add YouTube videos, playlists or channels | [YouTube](GUIDE.md#youtube) |
 | Add commercial breaks and bumpers | [Commercials tab](GUIDE.md#commercials-tab) · [The bumper library](GUIDE.md#the-bumper-library) |
 | Set up the guide or weather channel | [Guide channel](GUIDE.md#the-guide-channel) · [Weather channel](GUIDE.md#the-weather-channel) |
 | Watch on a TV, phone or Chromecast | [Watching](GUIDE.md#watching) |

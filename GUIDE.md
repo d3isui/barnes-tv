@@ -23,6 +23,7 @@ then [Building a channel](#building-a-channel). For a quick overview of what the
   - [Commercials tab](#commercials-tab)
   - [Bumpers tab](#bumpers-tab)
   - [Channel recipes](#channel-recipes)
+- [YouTube](#youtube)
 - [The bumper library](#the-bumper-library)
 - [The guide channel](#the-guide-channel)
 - [The weather channel](#the-weather-channel)
@@ -56,7 +57,7 @@ then [Building a channel](#building-a-channel). For a quick overview of what the
 |---|---|
 | **Python 3.10+** | Windows: `winget install Python.Python.3.12`, or get it from python.org (tick "Add to PATH"). Linux: usually already installed. Install `python3-venv` if needed. |
 | **ffmpeg** | Found automatically. It looks for **Jellyfin's own ffmpeg** first (`C:\Program Files\Jellyfin\Server\ffmpeg.exe` or `/usr/lib/jellyfin-ffmpeg/ffmpeg`), then for any ffmpeg on your PATH. |
-| **Pillow, PyChromecast** | Installed automatically by the start script. |
+| **Pillow, PyChromecast, yt-dlp, Deno** | Installed automatically by the start script (yt-dlp and Deno are only used for [YouTube](#youtube)). |
 | **A Jellyfin API key** | Create one in Jellyfin: **Dashboard → API Keys → +**. |
 
 It's easiest to run it on the same machine as Jellyfin, but it doesn't have to be. By default it streams media
@@ -394,6 +395,70 @@ away.
 | **Network channel** | Studio *Cartoon Network* or *Fuji TV* | Rotate shows | Half hour | Logo bottom-right at 60% opacity |
 | **Prime time** | A mix of shows | Shuffle | Half hour | A [time slot](#time-slots) for one show Mon–Fri 8–9 PM, in order |
 | **Sleep channel** | Ambient videos or a calm show | Shuffle | Back-to-back | 🌙 Sleep channel: screen off after 15 minutes |
+
+---
+
+## YouTube
+
+Any channel can play YouTube videos alongside (or instead of) your Jellyfin library. They stream straight from
+YouTube: nothing is downloaded to disk. Under **Scheduling → What plays on this channel**, pick **▶ YouTube link**
+in the type menu, paste a link and click **Add**:
+
+- **A video**: `https://www.youtube.com/watch?v=…` or `https://youtu.be/…`.
+- **A playlist**: any link with `list=…` in it.
+- **A whole channel**: `https://www.youtube.com/@name` (or a `/channel/…` link). Its newest 500 videos are used,
+  played oldest first; playlists play in their own order.
+
+The app reads the link right away and says how many videos and hours it found. Live streams, upcoming premieres,
+private and deleted videos are left out. YouTube links work in time slots and marathons too, and as filler.
+
+**How YouTube videos behave on a channel**
+
+- They're in the guide like any other program: the video's title, with the YouTube channel's name underneath, and its
+  thumbnail as the poster.
+- Each YouTube channel counts as one "show": **Never play the same show twice in a row** keeps two videos from the
+  same creator apart, and [balancing](#balancing-shows) treats each creator as one show.
+- **In order** plays them in YouTube's order. Commercial breaks follow the **During episodes** setting.
+- YouTube's own ads never play. (Sponsor segments that creators put inside their videos are part of the video, so
+  those do.)
+- The list of videos is re-read with the rest of the library (**Settings → Re-scan libraries every**), so new uploads
+  join the rotation.
+- Each video is looked up just before it airs (the upcoming one ahead of time), so it starts like any other program.
+  YouTube's links expire after a few hours, so nothing is stored.
+
+**What it needs**: [yt-dlp](https://github.com/yt-dlp/yt-dlp), which talks to YouTube, plus the Deno JavaScript
+runtime and yt-dlp's challenge solver. YouTube now requires these to play most videos. All three are installed by
+the start scripts. **Settings → YouTube** shows what's installed, and **Update YouTube support** upgrades them in
+the background without a restart. YouTube changes things often, and a newer yt-dlp is usually the fix when videos
+stop playing.
+
+**Signing in (optional)**
+
+You don't need to sign in to stream YouTube, and YouTube's ads don't play either way. Signing in is useful for:
+
+- age-restricted, members-only and private videos and playlists (including your own private playlists);
+- YouTube Premium's higher-bitrate streams;
+- when YouTube starts asking to "confirm you're not a bot".
+
+The sign-in works with a **cookies.txt** file:
+
+1. Open a private/incognito window and sign in to youtube.com.
+2. Export the cookies with a "cookies.txt" browser extension (for example *Get cookies.txt LOCALLY*).
+3. Close that window without signing out. (YouTube changes the cookies of a window that stays open, which can make
+   the exported ones stop working.)
+4. In **Settings → YouTube**, click **Upload cookies.txt…**, then **Test playback**.
+
+The file is kept in the data folder (`data/youtube/cookies.txt`) and only sent to YouTube. **Remove sign-in** deletes
+it. Treat it like a password: anyone with it can use your YouTube account.
+
+**Good to know**
+
+- Streaming through yt-dlp isn't an official YouTube app, so it's outside YouTube's terms of service, and YouTube can
+  change things at any time and break it until yt-dlp catches up. yt-dlp's developers warn that accounts used with it
+  can, rarely, be flagged; if that worries you, sign in with a secondary account.
+- Picture quality follows **Settings → Video → Resolution** (720p by default).
+- If a video can't be played (removed, region-blocked, needs a sign-in), the channel shows "Please Stand By" until
+  the next program, and the channel's **Log** says why.
 
 ---
 
@@ -869,6 +934,9 @@ Barnes default** removes your logos and name. Uploaded files live in `data/brand
 
 **🌤 Weather maps**: the **CARTO map key** for the street maps under the radar.
 
+**▶ YouTube**: what's installed for [YouTube](#youtube), **Upload cookies.txt…** / **Remove sign-in**, **Test
+playback** and **Update YouTube support**.
+
 **🧹 Maintenance: ↻ Restart server** stops every channel, stream and Chromecast connection and starts the server
 fresh, like closing and reopening it. It takes about 10 seconds; the page reconnects by itself, browser viewers
 reconnect, and Chromecasts that were casting are put back on the same channel. It works however you start the server
@@ -943,6 +1011,9 @@ viewer tunes in ──► session: one ffmpeg per program (seeks to the right sp
   supports. The app works with PyChromecast 13.1 on Python 3.8–3.10, and `start.bat` installs that automatically.
   If pip still fails, the app starts without casting. Installing Python 3.12 (`winget install Python.Python.3.12`)
   and deleting the `.venv` folder gets you the newest version.
+- **YouTube videos stop playing**, or "Please Stand By" on YouTube programs: **Settings → YouTube → Update YouTube
+  support**, then **Test playback**. If it asks you to confirm you're not a bot, or the video is private,
+  age-restricted or members-only, [sign in](#youtube). The channel's Log has the exact message.
 - **Clock shows the wrong time**: the clock uses the Broadcast machine's time zone.
 - **The admin page looks out of date after an update**: reload it once (Ctrl+F5). From 1.19.2 on, it reloads itself.
 

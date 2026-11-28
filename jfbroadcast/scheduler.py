@@ -13,6 +13,7 @@ import threading
 import time
 
 from .config import SCHEDULE_KEYS, _atomic_write
+from . import youtube
 from .jellyfin import Jellyfin, JellyfinError, normalize_item
 from .timeslots import all_occurrences, clean_slots
 
@@ -78,14 +79,14 @@ def show_key(it):
     """Which 'show' an item belongs to: the series for episodes, the item itself for movies and videos."""
     if not it:
         return None
-    if it.get("type") == "Episode":
+    if it.get("type") in ("Episode", "YouTube"):     # a YouTube channel counts as one show
         return "s:" + (it.get("series_id") or it.get("title") or it["id"])
     return "i:" + it["id"]
 
 
 def group_key(it):
     """How shows are grouped for airtime balancing: each series on its own, all movies together, all other clips together."""
-    if it.get("type") == "Episode":
+    if it.get("type") in ("Episode", "YouTube"):
         return show_key(it)
     return "movies" if it.get("type") == "Movie" else "clips"
 
@@ -95,6 +96,8 @@ def group_title(key, items):
         return "Movies"
     if key == "clips":
         return "Videos & clips"
+    if items[0].get("type") == "YouTube":
+        return (items[0].get("channel") or "YouTube") + " (YouTube)"
     return items[0].get("title") or "Show"
 
 
@@ -137,6 +140,8 @@ def spread_shuffle(items, rnd=random):
 
 
 def sort_key(it):
+    if it["type"] == "YouTube":          # YouTube keeps its own order (playlists as listed, channels oldest first)
+        return ("\uffff", it.get("order", 0), 0, "")
     if it["type"] == "Episode":
         return (it["title"].lower(), it["season"] if it["season"] is not None else 999,
                 it["episode"] if it["episode"] is not None else 9999, it["episode_title"].lower())
@@ -185,6 +190,7 @@ class ScheduleManager:
         self.refreshing = {}         # channel id -> time a background library refresh started
         self._rlocks = {}
         self._fetch_slots = threading.BoundedSemaphore(2)    # at most 2 channels query Jellyfin at once
+        self.source_errors = {}      # channel id -> problems with sources during the last library read
 
     # ---------- helpers ----------
     def jellyfin(self):
@@ -205,7 +211,20 @@ class ScheduleManager:
     def _resolve(self, jf, sources, ch, allow_types=None):
         types = allow_types or ch.get("item_types") or ["Movie", "Episode"]
         seen, out = set(), []
-        for src in sources:
+        for n, src in enumerate(sources):
+            if src.get("type") == "youtube":         # a YouTube video, playlist or channel URL
+                try:
+                    _, items, _ = youtube.list_source(src.get("id"), src.get("limit"))
+                except Exception as e:
+                    log.warning("YouTube source %s failed: %s", src.get("name") or src.get("id"), e)
+                    self.source_errors.setdefault(ch["id"], []).append(f"YouTube ({src.get('name') or src.get('id')}): {e}")
+                    continue
+                for it in items:
+                    if it["id"] not in seen:
+                        seen.add(it["id"])
+                        it["order"] = n * 100000 + it.get("pos", 0)
+                        out.append(it)
+                continue
             for raw in jf.resolve_source(src, types):
                 if raw["Id"] in seen:
                     continue
@@ -236,7 +255,7 @@ class ScheduleManager:
         over = max(20.0, float(br.get("split_over_seconds") or 90))
         commercials, compilations = [], []
         for c in self._resolve(jf, br.get("sources") or [], ch, types):
-            if split and over < c["duration"] <= 4 * 3600:
+            if split and over < c["duration"] <= 4 * 3600 and c["type"] != "YouTube":
                 compilations.append({k: c.get(k) for k in ("id", "title", "duration", "path", "chapters", "type")})
                 spots = self.splitter.spots(c)
                 if spots == "whole":
@@ -251,6 +270,7 @@ class ScheduleManager:
     def refresh_pool(self, ch):
         cid = ch["id"]
         jf = self.jellyfin()
+        self.source_errors[cid] = []
         try:
             items = self._resolve(jf, ch.get("sources", []), ch)
             if ch.get("exclude"):
@@ -279,7 +299,7 @@ class ScheduleManager:
             vbumpers = [c for c in self._resolve(jf, bu.get("sources") or [], ch, short_types)
                         if c["duration"] <= 5 * 60] if bu.get("enabled") and bu.get("sources") else []
             pool = Pool(items, fillers, time.time(), commercials=commercials, bumpers=vbumpers, compilations=compilations,
-                        slots=slots, hash=pool_hash(ch))
+                        slots=slots, hash=pool_hash(ch), error="; ".join(self.source_errors.get(cid) or []))
             _atomic_write(self._pool_path(cid), json.dumps({"items": items, "fillers": fillers, "fetched": pool.fetched,
                                                             "slots": slots,
                                                             "commercials": commercials, "bumpers": vbumpers,
@@ -677,8 +697,11 @@ class ScheduleManager:
 
     @staticmethod
     def _slim(it):
-        return {k: it[k] for k in ("id", "type", "title", "episode_title", "season", "episode", "year", "overview",
-                                   "genres", "rating", "duration", "image_id", "path", "series_id", "premiere")}
+        out = {k: it[k] for k in ("id", "type", "title", "episode_title", "season", "episode", "year", "overview",
+                                  "genres", "rating", "duration", "image_id", "path", "series_id", "premiere")}
+        if it.get("channel"):
+            out["channel"] = it["channel"]
+        return out
 
     @staticmethod
     def _lru_pick(candidates, history, key=lambda c: c["id"]):
@@ -702,8 +725,8 @@ class ScheduleManager:
         dur = item["duration"]
         if not br.get("enabled"):
             return []
-        if (item["type"] == "Episode" and not br.get("episodes", True)) or \
-                (item["type"] != "Episode" and not br.get("movies", True)):
+        episodic = item["type"] in ("Episode", "YouTube")       # YouTube videos follow "during episodes"
+        if (episodic and not br.get("episodes", True)) or (not episodic and not br.get("movies", True)):
             return []
         interval = max(30.0, float(br.get("interval_minutes") or 8) * 60)
         tail = max(0.0, float(br.get("min_tail_minutes") if br.get("min_tail_minutes") is not None else 3) * 60)

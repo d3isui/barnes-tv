@@ -12,7 +12,7 @@ from .ffmpeg import Builder
 from . import fontlib, themes
 from .weather import WeatherService
 from .adsplit import AdSplitter
-from . import branding, loudness
+from . import branding, loudness, youtube
 from .graphics import Fonts, font_set
 from .hls import HLSManager
 from .lock import ChannelLock
@@ -43,6 +43,7 @@ class App:
         except OSError:
             pass
         self.port = port
+        youtube.init(self.store.data_dir, lambda: self.store.settings)
         self.sched = ScheduleManager(self.store)
         self.sessions = Sessions(self)
         self.hls = HLSManager(self)
@@ -261,6 +262,13 @@ class App:
                 except Exception as e:
                     log.warning("music loudness scan failed: %s", e)
             self.stop_evt.wait(1800)
+
+    def fetch_image(self, item_id, h):
+        """Poster art for an item: YouTube thumbnails from YouTube, everything else from Jellyfin."""
+        if youtube.is_youtube(item_id):
+            return youtube.thumbnail_bytes(item_id, h)
+        jf = self.sched.jellyfin()
+        return jf.fetch_bytes(jf.image_url(item_id, "Primary", h))
 
     def start_maintenance(self):
         loudness.init(self.store.data_dir / "cache" / "music-loudness.json", self.ffmpeg_path)

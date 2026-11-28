@@ -20,9 +20,10 @@ copy /y requirements.txt ".venv\requirements.installed" >nul
 goto :run
 :essentials
 echo.
-echo Some optional packages could not be installed. Installing the essentials only.
-echo Casting to Chromecast may be unavailable - see GUIDE.md, Troubleshooting.
-".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q "Pillow>=10.1" || goto :pipfail
+echo Some packages could not be installed. Trying them one at a time (the app runs without the ones that fail:
+echo casting needs PyChromecast, YouTube needs yt-dlp - see GUIDE.md, Troubleshooting).
+for /f "usebackq eol=# tokens=*" %%p in ("requirements.txt") do ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q "%%p"
+".venv\Scripts\python.exe" -c "import PIL" || goto :pipfail
 :run
 ".venv\Scripts\python.exe" broadcast.py %*
 goto :eof

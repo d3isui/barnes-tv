@@ -233,8 +233,9 @@ class Builder:
     # ------------------------------------------------------------ commands
     def segment(self, ch, *, source=None, image=None, concat=None, duration, offset=0.0, ts_offset=0.0, audio_index=None,
                 has_audio=True, hdr=False, logo_path=None, music=None, up_next=None, headers=None, preview=False,
-                initial_burst=0.0, subtitle=None):
-        """source = media URL/path, or image = slate PNG. Produces MPEG-TS on stdout (or one JPEG if preview)."""
+                initial_burst=0.0, subtitle=None, audio_source=None, audio_headers=None):
+        """source = media URL/path, or image = slate PNG. Produces MPEG-TS on stdout (or one JPEG if preview).
+        audio_source: the sound comes from a separate address (YouTube sends picture and sound separately)."""
         st, W, H, fps = self.st, self.W, self.H, self.fps
         pre, vtail, venc = encoder_args(st)
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"] + (pre if not preview else [])
@@ -263,6 +264,19 @@ class Builder:
             n_in += 1
         else:
             logo_path = None
+        # separate sound track (YouTube): read in step with the picture
+        aud_idx = None
+        if audio_source and source and not preview:
+            if audio_headers:
+                cmd += ["-headers", audio_headers]
+            cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "4"]
+            if offset > 0.5:
+                cmd += ["-ss", f"{offset:.3f}"]
+            if initial_burst and re_:
+                cmd += ["-readrate_initial_burst", f"{initial_burst:.1f}"]
+            cmd += ["-thread_queue_size", "1024"] + re_ + ["-i", audio_source]
+            aud_idx = n_in
+            n_in += 1
         # next input: audio bed for slates / silent media
         bed_idx = n_in
         still = bool(image or concat)
@@ -312,7 +326,8 @@ class Builder:
         graph += ov
         # identical colour tags on every segment, so the H.264 headers never change mid-stream
         graph.append(f"[{cur}]format=yuv420p,{TAGS}{'' if preview else vtail}[v]")
-        a_in = f"{bed_idx}:a" if need_bed else (f"0:a:{audio_index}" if audio_index is not None else "0:a:0")
+        a_in = f"{bed_idx}:a" if need_bed else (f"{aud_idx}:a:0" if aud_idx is not None else
+                                                (f"0:a:{audio_index}" if audio_index is not None else "0:a:0"))
         anorm = bed_af + (",loudnorm=I=-16:TP=-1.5:LRA=11" if ch.get("normalize_audio") and not still and not bed_music else "")
         if still and music and os.path.isfile(music) and duration > 3:
             anorm += f",afade=t=in:d=0.4,afade=t=out:st={max(0.0, duration - 1.2):.2f}:d=1.2"

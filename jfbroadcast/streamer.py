@@ -21,7 +21,7 @@ from PIL import Image
 
 from .config import NO_WINDOW
 from .epg import channel_entries
-from . import branding, themes
+from . import branding, themes, youtube
 from .graphics import (readable, GuideRenderer, ImageCache, bumper_vars, bumper_needs_weather, bumper_time_ok,
                        bumper_weather_ok, default_logo, program_label, render_bumper,
                        render_slate)
@@ -385,6 +385,9 @@ class ChannelSession(BaseSession):
         if iid in self.details:
             return self.details[iid]
         info = {"audio_index": None, "has_audio": True, "hdr": False}
+        if youtube.is_youtube(item):
+            info["subs"] = []
+            return info
         try:
             d = self.app.sched.jellyfin().item_details(iid) or {}
             streams = d.get("MediaStreams") or []
@@ -499,6 +502,13 @@ class ChannelSession(BaseSession):
             return None
 
     def _source(self, item, info):
+        """(media address, HTTP headers, separate audio address or None, its headers)"""
+        if youtube.is_youtube(item):
+            r = youtube.resolve(item, self.app.builder().H)
+            return r["video"], r["headers"] or None, r.get("audio"), r.get("audio_headers") or None
+        return self._source_media(item, info) + (None, None)
+
+    def _source_media(self, item, info):
         st = self.app.store.settings
         jf = self.app.sched.jellyfin()
         if st.get("media_access") == "direct":
@@ -576,7 +586,11 @@ class ChannelSession(BaseSession):
         if kind in ("program", "filler", "commercial", "bumper"):
             item = entry["i"]
             info = self._item_info(item)
-            src, headers = self._source(item, info)
+            try:
+                src, headers, audio_src, audio_headers = self._source(item, info)
+            except (youtube.YouTubeError, subprocess.TimeoutExpired, OSError) as e:
+                self.logf(f"YouTube: couldn't play {item.get('title')}: {e}")
+                return self._start(entry, ts, offset=offset, force_kind="error")    # "Please Stand By" until next
             up = None
             un = ch.get("up_next") or {}
             if kind == "program" and un.get("enabled") and entry["d"] > 300 and entry.get("last", True):
@@ -598,7 +612,8 @@ class ChannelSession(BaseSession):
             sub, why = self.subtitle_choice(item, info, kind)
             if (self._channel().get("subtitles") or {}).get("mode", "off") != "off" and kind == "program":
                 self.logf(f"subtitles for {item.get('title')}: {why}")
-            cmd = b.segment(ch, source=src, headers=headers, offset=offset + entry.get("o", 0.0),
+            cmd = b.segment(ch, source=src, headers=headers, audio_source=audio_src, audio_headers=audio_headers,
+                            offset=offset + entry.get("o", 0.0),
                             audio_index=info["audio_index"], has_audio=info["has_audio"], hdr=info["hdr"],
                             up_next=up, initial_burst=burst, subtitle=sub, **common)
             label = f"{kind}: {item.get('title')}" + (f" [subtitles: {sub.get('title') or sub['kind']}]" if sub else "")
@@ -679,12 +694,14 @@ class ChannelSession(BaseSession):
         kind = kind or (entry or {}).get("k")
         if kind in ("slate", "error") or (kind == "bumper" and (entry or {}).get("b")):
             return "local"
+        if youtube.is_youtube((entry or {}).get("i") or {}):
+            return "yt"
         return "seek" if (entry or {}).get("o") else "media"
 
     def _lat(self, entry, kind=None):
         lat = getattr(self, "lat", None)
         if lat is None:
-            lat = self.lat = {"local": 0.6, "media": 1.0, "seek": 1.5}
+            lat = self.lat = {"local": 0.6, "media": 1.0, "seek": 1.5, "yt": 2.5}
         return lat[self._lat_kind(entry, kind)]
 
     def _emitted(self, play):
@@ -738,6 +755,8 @@ class ChannelSession(BaseSession):
                     if getattr(cur, "upcoming", None) is None:
                         self._learn(cur)
                         cur.upcoming = self._entry_after(self._channel(), cur.next_at)
+                        if youtube.is_youtube((cur.upcoming or {}).get("i") or {}):     # look it up ahead of time
+                            youtube.prefetch(cur.upcoming["i"], self.app.builder().H)
                     if cur.media_elapsed(now) >= cur.duration - self._lat(cur.upcoming) - 0.5:
                         nxt = self._start_synced(cur.upcoming, cur.ts + cur.duration + GUARD)
                 try:
@@ -839,9 +858,7 @@ class GuideSession(BaseSession):
             st = self.app.store.settings
             b = self.app.builder()
             gch = self.app.store.channel(self.cid) or self.ch
-            images = ImageCache(self.app.store.data_dir / "images",
-                                lambda iid, h: self.app.sched.jellyfin().fetch_bytes(
-                                    self.app.sched.jellyfin().image_url(iid, "Primary", h)))
+            images = ImageCache(self.app.store.data_dir / "images", self.app.fetch_image)
             def make_renderer(gch, st):
                 T = self.app.theme(gch)
                 Ft, Fd = self.app.theme_fonts(T, gch.get("guide_font"), gch.get("guide_display_font"))

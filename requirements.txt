@@ -3,4 +3,9 @@ Pillow>=10.1
 PyChromecast>=13.1
 # HTTPS certificates: check them like the browser does (truststore), with Mozilla's list as a fallback (certifi)
 certifi
-truststore>=0.9; python_version >= "3.10"
+truststore>=0.9
+# YouTube sources: yt-dlp talks to YouTube; it needs a JavaScript runtime (Deno, from the "deno" package) and its
+# challenge-solver scripts (yt-dlp-ejs). Settings -> YouTube -> "Update YouTube support" upgrades all three.
+yt-dlp>=2025.11.12
+yt-dlp-ejs
+deno

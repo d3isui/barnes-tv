@@ -252,6 +252,8 @@ def program_label(item):
         return "", ""
     if item.get("type") == "Weather":
         return item["title"], item.get("summary") or ""
+    if item.get("type") == "YouTube":
+        return item["title"], item.get("channel") or "YouTube"
     if item.get("type") == "Episode":
         se = ""
         if item.get("season") is not None and item.get("episode") is not None:

@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import mimetypes
+import os
 import queue
 import re
 import subprocess
@@ -249,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
             m = re.fullmatch(r"/logos/([^/]+?)\.png", path)
             if m:
                 return self.logo(m.group(1))
-            m = re.fullmatch(r"/img/([0-9a-fA-F-]+)\.jpg", path)
+            m = re.fullmatch(r"/img/([0-9a-fA-F-]+|yt-[A-Za-z0-9_-]{11})\.jpg", path)
             if m:
                 return self.image(m.group(1), int(qs.get("h", 360)))
         if path.startswith("/api/"):
@@ -403,9 +404,9 @@ class Handler(BaseHTTPRequestHandler):
         h = max(60, min(h, 1080))
         p = self.app.store.data_dir / "images" / f"{item_id}-{h}.jpg"
         if not p.exists():
-            jf = self.app.sched.jellyfin()
             try:
-                data = jf.fetch_bytes(jf.image_url(item_id, "Primary", h))
+                data = self.app.fetch_image(item_id, h)
+                p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_bytes(data)
             except Exception:
                 return self.error(404, "no image")
@@ -534,6 +535,8 @@ class Handler(BaseHTTPRequestHandler):
                               "users": users})
         if path == "jellyfin/sources":
             return self.json(sched.jellyfin().list_sources(qs.get("type", "library"), qs.get("q", "")))
+        if path.startswith("youtube/"):
+            return self.youtube_api(method, path[len("youtube/"):], qs)
         if path == "jellyfin/episodes":       # what a source holds, in order (marathon "start with" picker)
             from .jellyfin import normalize_item
             from .scheduler import _ep_label, sort_key
@@ -674,6 +677,55 @@ class Handler(BaseHTTPRequestHandler):
                     self.app.sched.reset(ch, keep_current=True)
                 except Exception as e:
                     log.info("reschedule after bumper change failed for %s: %s", ch["name"], e)
+
+    def youtube_api(self, method, action, qs):
+        from . import youtube
+        if action == "status" and method == "GET":
+            ver, rt = youtube.installed()
+            return self.json({"ytdlp": ver, "js_runtime": rt[0] if rt else None, "cookies": youtube.has_cookies(),
+                              "update": youtube.update_status()})
+        if action == "cookies" and method == "POST":         # a cookies.txt exported from a signed-in browser
+            text = self.body().decode("utf-8", "replace")
+            lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#") or l.startswith("#HttpOnly_")]
+            yt = [l for l in lines if ".youtube.com" in l.split("\t")[0]]
+            if not yt or any(len(l.split("\t")) < 7 for l in yt):
+                return self.error(400, "That doesn't look like a cookies.txt with YouTube cookies in it (Netscape format, "
+                                       "exported while signed in to youtube.com).")
+            p = youtube.cookies_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text if text.startswith("# Netscape") else "# Netscape HTTP Cookie File\n" + text, encoding="utf-8")
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
+            return self.json({"ok": True, "cookies": len(yt)})
+        if action == "cookies" and method == "DELETE":
+            p = youtube.cookies_path()
+            if p and p.exists():
+                p.unlink()
+            return self.json({"ok": True})
+        if action == "update" and method == "POST":
+            youtube.update()
+            return self.json(youtube.update_status())
+        if action == "inspect" and method == "GET":         # what a URL holds (when it's added to a channel)
+            try:
+                title, items, skipped = youtube.list_source(qs.get("url", ""), qs.get("limit"))
+            except Exception as e:
+                return self.error(400, str(e))
+            url = youtube.normalize_url(qs.get("url", ""))
+            return self.json({"title": title, "kind": youtube.kind_of(url), "url": url, "videos": len(items),
+                              "skipped": skipped, "hours": round(sum(i["duration"] for i in items) / 3600, 1)})
+        if action == "test" and method == "GET":            # can we actually play it? (checks cookies + runtime)
+            try:
+                _, items, _ = youtube.list_source(qs.get("url") or "https://www.youtube.com/watch?v=jNQXAC9IVRw", 1)
+                if not items:
+                    return self.error(400, "No playable video at that address.")
+                r = youtube.resolve(items[0], self.app.builder().H)
+            except Exception as e:
+                return self.error(400, str(e))
+            return self.json({"title": items[0]["title"], "format": r.get("format"), "height": r.get("height"),
+                              "separate_audio": bool(r.get("audio"))})
+        return self.error(404, "unknown YouTube action")
 
     def channel_summary(self, ch, deep=True):
         out = dict(ch)
