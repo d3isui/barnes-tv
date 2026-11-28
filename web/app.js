@@ -151,9 +151,24 @@ const CLOCK_PRESETS = {
 };
 
 let STATUS = null;
+// The admin page is one long-lived page: after the server is updated, an open tab would keep running the old page
+// (while the header already shows the new version). Notice that and load the new page.
+let PAGE_VERSION = null;
+function checkPageVersion(v) {
+  if (!v) return;
+  if (!PAGE_VERSION) { PAGE_VERSION = v; return; }
+  if (v === PAGE_VERSION) return;
+  if (!leaveGuard || leaveGuard(true)) { location.reload(); return; }
+  if ($("#newver")) return;
+  const el = document.createElement("div");
+  el.id = "newver"; el.className = "replans"; el.style.bottom = "64px";
+  el.innerHTML = `The server was updated to v${esc(v)}. <a href="#" id="newver_go"><b>Reload this page</b></a> after saving to get the new version.`;
+  document.body.appendChild(el);
+  $("#newver_go").onclick = (e) => { e.preventDefault(); location.reload(); };
+}
 async function loadStatus() {
   try { STATUS = await api("GET", "status"); } catch (e) { STATUS = null; }
-  if (STATUS) $("#ver").textContent = "v" + STATUS.version;
+  if (STATUS) { $("#ver").textContent = "v" + STATUS.version; checkPageVersion(STATUS.version); }
   if (STATUS && STATUS.brand) { Object.assign(BRAND, STATUS.brand); $("#station").textContent = BRAND.name; }
   return STATUS;
 }
@@ -175,6 +190,9 @@ async function route() {
   try { await fn(arg); } catch (e) { view.innerHTML = `<div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div>`; }
 }
 window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => loadStatus());                  // also notices a server update
+setInterval(() => { if (!document.hidden) loadStatus(); }, 120000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadStatus(); });
 window.addEventListener("beforeunload", (e) => { if (leaveGuard && !leaveGuard(true)) { e.preventDefault(); e.returnValue = ""; } });
 
 // --------------------------------------------------------------------------- channels list
