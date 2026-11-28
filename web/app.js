@@ -1092,7 +1092,9 @@ async function showChannel(id) {
 
   // ---- pool breakdown & airtime balancing
   const PIE = ["#ffb000", "#4f8cff", "#ff5d73", "#34d399", "#a78bfa", "#f97316", "#22d3ee", "#e879f9", "#a3e635", "#fb7185", "#60a5fa", "#fbbf24"];
-  let POOL = null, poolMode = "hours";
+  const savedBal = ch.balance || {};
+  // with balancing on, open on the airtime it's set to give (that's what the weights change), else the pool by hours
+  let POOL = null, poolMode = (+savedBal.strength > 0 || Object.values(savedBal.weights || {}).some((v) => Math.abs(v - 1) > 1e-6)) ? "plan" : "hours";
   const balW = { ...(((ch.balance || {}).weights) || {}) };
   function poolBalance() { const w = {}; for (const [k, v] of Object.entries(balW)) if (Math.abs(v - 1) > 1e-6) w[k] = v; return { strength: +($("#bal_strength")?.value || 0), weights: w }; }
   const balanced = () => { const b = poolBalance(); return b.strength > 0 || Object.keys(b.weights).length > 0; };
@@ -1113,7 +1115,7 @@ async function showChannel(id) {
     const plan = planShares(G), totalS = G.reduce((s, g) => s + g.seconds, 0), totalN = G.reduce((s, g) => s + g.items, 0);
     const val = (g, i) => poolMode === "items" ? g.share_items : poolMode === "hours" ? g.share_time : poolMode === "plan" ? (balanced() ? plan[i] : g.share_time) : g.scheduled;
     $("#pool_total").textContent = poolMode === "items" ? `${totalN} items in ${G.length} show${G.length > 1 ? "s" : ""}` :
-      poolMode === "hours" ? `${fmtH(totalS)} of programmes` : poolMode === "plan" ? (balanced() ? "the airtime each show will get" : "balancing is off: airtime follows the pool")
+      poolMode === "hours" ? `${fmtH(totalS)} of programs` : poolMode === "plan" ? (balanced() ? "the airtime each show will get" : "balancing is off: airtime follows the pool")
       : POOL.scheduled_hours ? `what's actually scheduled in the next ${POOL.scheduled_hours} h` : "nothing scheduled yet";
     // pie (slices under 2% are drawn together)
     let a0 = -Math.PI / 2, paths = "", other = 0;
@@ -1127,10 +1129,11 @@ async function showChannel(id) {
     G.forEach((g, i) => { const v = val(g, i); if (v < 0.02) other += v; else arc(v, PIE[i % PIE.length], g.title); });
     arc(other, "#6b7280", "Others");
     $("#pool_pie").innerHTML = paths + `<circle r="52" fill="var(--panel, #111)"/>`;
-    $("#pool_legend").innerHTML = `<table class="pooltab"><tr><th></th><th>Show</th><th>Items</th><th>Hours</th><th>%</th><th title="More or less airtime for this show, on top of the balancing above">Weight</th></tr>${G.map((g, i) => {
+    $("#pool_legend").innerHTML = `<table class="pooltab"><tr><th></th><th>Show</th><th>Items</th><th>Hours</th><th title="What the chart shows">${{ items: "% of items", hours: "% of hours", plan: "Airtime goal", sched: "Scheduled" }[poolMode]}</th>${balanced() && poolMode !== "plan" ? '<th title="The share of airtime balancing aims for">Goal</th>' : ""}<th title="More or less airtime for this show, on top of the balancing above">Weight</th></tr>${G.map((g, i) => {
       const m = balW[g.key] ?? 1, share = plan[i], back = balanced() && share > 0 ? g.seconds / share / 86400 : null;
       return `<tr><td><i class="dot" style="background:${val(g, i) < 0.02 ? "#6b7280" : PIE[i % PIE.length]}"></i></td><td class="t" title="${esc(g.title)}">${esc(g.title)}</td>
         <td>${g.items}</td><td>${fmtH(g.seconds)}</td><td><b>${(val(g, i) * 100).toFixed(val(g, i) < 0.1 ? 1 : 0)}%</b></td>
+        ${balanced() && poolMode !== "plan" ? `<td class="sub">${(plan[i] * 100).toFixed(plan[i] < 0.1 ? 1 : 0)}%</td>` : ""}
         <td class="w"><span class="wr"><input type="range" min="-2" max="2" step="0.25" value="${Math.log2(m)}" data-bw="${esc(g.key)}" aria-label="Weight for ${esc(g.title)}"><span>${wLabel(m)}</span></span>
         ${back !== null && back < 2 ? `<small class="warn" title="With this much airtime every episode has aired and the show starts over about this often">all of it every ${back < 1 ? Math.max(1, Math.round(back * 24)) + " h" : back.toFixed(1) + " days"}</small>` : ""}</td></tr>`;
     }).join("")}</table>${noRepeatCap(plan)}`;
