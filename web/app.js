@@ -56,6 +56,36 @@ function toast(msg, err) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), err ? 7000 : 3000);
 }
+// ---- channels being re-planned on the server (after Save / Rebuild): a pill bottom-left while it runs, a toast
+// when it's done. Keeps going if you move to another page.
+const REPLANS = new Map();      // channel id -> {name, onDone: [fn], polls}
+function trackReplan(cid, name, onDone) {
+  const job = REPLANS.get(cid) || { name, onDone: [], polls: 0 };
+  if (onDone) job.onDone.push(onDone);
+  job.name = name; job.polls = 0;
+  const fresh = !REPLANS.has(cid);
+  REPLANS.set(cid, job);
+  drawReplans();
+  if (fresh) setTimeout(() => pollReplan(cid), 700);
+}
+async function pollReplan(cid) {
+  const job = REPLANS.get(cid);
+  if (!job) return;
+  let busy = true;
+  try { busy = (await api("GET", `channels/${cid}/status`)).rebuilding; } catch { busy = ++job.polls < 5; }
+  if (busy && job.polls++ < 400) { setTimeout(() => pollReplan(cid), 1500); return; }
+  REPLANS.delete(cid); drawReplans();
+  toast(`✓ “${job.name}”: the schedule is up to date`);
+  job.onDone.forEach((f) => { try { f(); } catch { /* the page moved on */ } });
+}
+function drawReplans() {
+  let el = document.getElementById("replans");
+  if (!REPLANS.size) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "replans"; el.className = "replans"; document.body.appendChild(el); }
+  const names = [...REPLANS.values()].map((j) => j.name);
+  el.innerHTML = `<span class="spin"></span> Updating ${names.length > 1 ? `${names.length} channels' schedules` : `“${esc(names[0])}” schedule`} in the background…`;
+  el.title = "You can keep working or leave this page; it carries on on the server.";
+}
 const fmtTime = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const fmtDay = (t) => new Date(t * 1000).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 async function copy(text) {
@@ -511,7 +541,9 @@ async function showChannel(id) {
   </div>`;
 
   let dirty = false;
+  let editSeq = 0;
   function markDirty() {
+    editSeq++;
     $("#chtabs .tab.active")?.classList.add("changed");     // a dot on the tab with unsaved changes
     if (dirty) return;
     dirty = true;
@@ -542,7 +574,7 @@ async function showChannel(id) {
   try { firstTab = sessionStorage.getItem("jfb-chtab") || firstTab; } catch { /* private mode */ }
   showTab(firstTab);
   $$(".corners button").forEach((x) => x.addEventListener("click", markDirty));
-  leaveGuard = (silent) => !dirty || (!silent && confirm("This channel has unsaved changes. Leave without saving?"));
+  leaveGuard = (silent) => !dirty || saving || (!silent && confirm("This channel has unsaved changes. Leave without saving?"));
   if (!guide) {
     wireSourcePicker("src", sources, markDirty); wireSourcePicker("exc", exclude, markDirty); wireSourcePicker("fil", fillers, markDirty);
     wireSourcePicker("brk", brSources, markDirty); wireSourcePicker("bmp", buSources, markDirty);
@@ -602,20 +634,38 @@ async function showChannel(id) {
     if (!d.item_types.length) d.item_types = ["Movie", "Episode"];
     return d;
   };
+  let saving = false;
+  const refreshPanels = () => { if (!$("#chtabs") || location.hash !== `#/channel/${ch.id}`) return; loadSchedule(); loadPool && loadPool(); loadSlots && loadSlots(); };
   const save = async (quiet) => {
     const d = collect();
     const typeChanged = d.type !== ch.type;
-    await api("PUT", "channels/" + ch.id, d);
-    dirty = false;
-    $$("#chtabs .tab.changed").forEach((b) => b.classList.remove("changed"));
-    $("#save").textContent = "Save"; $("#save").classList.remove("dirty"); $("#unsaved").style.display = "none";
-    $("h1").textContent = `${d.number} · ${d.name}`;
-    if (!quiet) toast(d.sources && d.sources.length ? "Saved — building the schedule now" : "Saved");
+    const btn = $("#save"), seq = editSeq;
+    saving = true;
+    btn.disabled = true; btn.classList.add("busy"); btn.innerHTML = '<span class="spin"></span> Saving…';
+    let r;
+    try { r = await api("PUT", "channels/" + ch.id, d); }
+    finally {
+      saving = false;
+      if (btn.isConnected) { btn.disabled = false; btn.classList.remove("busy"); btn.textContent = dirty ? "Save changes" : "Save"; }
+    }
+    if (editSeq !== seq) {            // more changes came in while saving: they still need a save
+      if (btn.isConnected) { btn.textContent = "Save changes"; btn.classList.add("dirty"); }
+    } else dirty = false;
+    if (btn.isConnected && !dirty) {
+      $$("#chtabs .tab.changed").forEach((b) => b.classList.remove("changed"));
+      btn.textContent = "Save"; btn.classList.remove("dirty"); $("#unsaved").style.display = "none";
+      $("h1").textContent = `${d.number} · ${d.name}`;
+    }
+    ch.slots = d.slots;
+    if (r && r.rebuilding) {
+      trackReplan(ch.id, d.name, refreshPanels);
+      if (!quiet) toast("Saved. The schedule is being updated in the background: you can leave this page.");
+    } else if (!quiet) toast("Saved");
     if (typeChanged) route();
-loadStatus();
+    loadStatus();
     return d;
   };
-  $("#save").onclick = async () => { try { await save(); loadSchedule(); setTimeout(() => { loadPool && loadPool(); loadSlots && loadSlots(); }, 1500); } catch (e) { toast(e.message, true); } };
+  $("#save").onclick = async () => { try { await save(); refreshPanels(); } catch (e) { toast(e.message, true); } };
   $("#castbtn").onclick = () => castDialog(ch.id, `${ch.number} ${ch.name}`);
   if ($("#sub_check")) $("#sub_check").onclick = async () => {
     $("#sub_result").textContent = "Checking…";
@@ -733,12 +783,12 @@ loadStatus();
     $("#rebuild_now").onclick = async () => {
       if (!confirm("Start a brand-new schedule right now? What's on will be replaced.")) return;
       $("#rebuild_now").disabled = true;
-      try { await save(true); await api("POST", `channels/${ch.id}/rebuild_now`); toast("New schedule: starting now"); loadSchedule(); }
+      try { await save(true); await api("POST", `channels/${ch.id}/rebuild_now`); trackReplan(ch.id, ch.name, refreshPanels); toast("Starting a new schedule now: re-reading the library…"); }
       catch (e) { toast(e.message, true); } finally { $("#rebuild_now").disabled = false; }
     };
     $("#rebuild").onclick = async () => {
       $("#rebuild").disabled = true;
-      try { await save(true); await api("POST", `channels/${ch.id}/rebuild`); toast("Schedule rebuilt"); loadSchedule(); }
+      try { await save(true); await api("POST", `channels/${ch.id}/rebuild`); trackReplan(ch.id, ch.name, refreshPanels); toast("Rebuilding the schedule: re-reading the library…"); }
       catch (e) { toast(e.message, true); } finally { $("#rebuild").disabled = false; }
     };
   }
@@ -1059,7 +1109,7 @@ loadStatus();
     const G = POOL.groups;
     $$("[data-pm]").forEach((b) => b.classList.toggle("primary", b.dataset.pm === poolMode));
     $("#bal_val").textContent = +$("#bal_strength").value ? $("#bal_strength").value + "%" : "off";
-    if (!G.length) { $("#pool_total").textContent = "Nothing in the pool yet: add some sources and save."; $("#pool_pie").innerHTML = ""; $("#pool_legend").innerHTML = ""; return; }
+    if (!G.length) { $("#pool_total").textContent = POOL.loading ? "Reading the library…" : "Nothing in the pool yet: add some sources and save."; $("#pool_pie").innerHTML = ""; $("#pool_legend").innerHTML = ""; return; }
     const plan = planShares(G), totalS = G.reduce((s, g) => s + g.seconds, 0), totalN = G.reduce((s, g) => s + g.items, 0);
     const val = (g, i) => poolMode === "items" ? g.share_items : poolMode === "hours" ? g.share_time : poolMode === "plan" ? (balanced() ? plan[i] : g.share_time) : g.scheduled;
     $("#pool_total").textContent = poolMode === "items" ? `${totalN} items in ${G.length} show${G.length > 1 ? "s" : ""}` :

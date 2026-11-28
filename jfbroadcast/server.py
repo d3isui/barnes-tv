@@ -554,7 +554,7 @@ class Handler(BaseHTTPRequestHandler):
             for ch in store.channels():
                 if not ch.get("enabled", True):
                     continue
-                entries = epg.channel_entries(app, ch, t0, t0 + hours * 3600)
+                entries = epg.channel_entries(app, ch, t0, t0 + hours * 3600, wait=False)
                 out.append({"id": ch["id"], "number": ch["number"], "name": ch["name"], "type": ch["type"],
                             "locked": app.lock.is_locked(ch),
                             "logo": f"/logos/{ch['id']}.png", "entries": [entry_json(e) for e in entries]})
@@ -682,6 +682,7 @@ class Handler(BaseHTTPRequestHandler):
         out["locked"] = self.app.lock.is_locked(ch)
         sess = self.app.sessions.status().get(ch["id"])
         out["session"] = sess
+        out["rebuilding"] = self.app.sched.busy(ch["id"])
         if deep and ch.get("type") == "weather":
             now = time.time()
             progs = epg.weather_entries(self.app, ch, now, now + 7200)
@@ -689,7 +690,7 @@ class Handler(BaseHTTPRequestHandler):
         elif deep and ch.get("type") != "guide" and self.app.store.settings.get("jellyfin_api_key"):
             try:
                 now = time.time()
-                progs = epg.merged_programs(self.app.sched.entries_between(ch, now - 6 * 3600, now + 12 * 3600))
+                progs = epg.merged_programs(self.app.sched.entries_between(ch, now - 6 * 3600, now + 12 * 3600, wait=False))
                 cur = next((p for p in progs if p["s"] <= now < p["s"] + p["d"]), None)
                 nxt = next((p for p in progs if p["s"] > now and p["k"] == "program"), None)
                 out["now"] = entry_json(cur)
@@ -721,9 +722,11 @@ class Handler(BaseHTTPRequestHandler):
                 if new.get("type") != ch.get("type") or not new.get("enabled", True):
                     app.sessions.stop(cid)
                 if any(ch.get(k) != new.get(k) for k in SCHEDULE_KEYS):
-                    sched.pools.pop(cid, None)
-                    sched.reset(new, keep_current=True)
-                app.sessions.reload(cid)
+                    # re-plan in the background (re-reading the library only if the sources changed): the page
+                    # gets its answer right away, and the stream picks up the new plan when it's ready
+                    sched.rebuild_async(cid, on_done=lambda: app.sessions.reload(cid))
+                else:
+                    app.sessions.reload(cid)
                 return self.json(self.channel_summary(new))
             if method == "DELETE":
                 app.sessions.stop(cid)
@@ -736,7 +739,7 @@ class Handler(BaseHTTPRequestHandler):
         if action == "schedule":
             hours = min(72.0, float(qs.get("hours", 24)))
             now = time.time()
-            return self.json([entry_json(e) for e in epg.channel_entries(app, ch, now - 3600, now + hours * 3600)])
+            return self.json([entry_json(e) for e in epg.channel_entries(app, ch, now - 3600, now + hours * 3600, wait=False)])
         if action == "logo":
             p = store.data_dir / "logos" / f"{cid}.png"
             if method == "POST":
@@ -793,15 +796,13 @@ class Handler(BaseHTTPRequestHandler):
             sched.slot_next(ch, sid, item)
             app.sessions.reload(cid)
             return self.json(sched.slots_info(ch))
-        if action == "rebuild_now" and method == "POST":
-            sched.rebuild_now(ch)
-            app.sessions.reload(cid)
+        if action in ("rebuild_now", "rebuild") and method == "POST":     # runs in the background
+            sched.rebuild_async(cid, on_done=lambda: app.sessions.reload(cid),
+                                mode="now" if action == "rebuild_now" else "refresh")
             return self.json(self.channel_summary(store.channel(cid)))
-        if action == "rebuild" and method == "POST":
-            sched.pool(ch, force=True)
-            sched.reset(ch, keep_current=True)
-            app.sessions.reload(cid)
-            return self.json(self.channel_summary(store.channel(cid)))
+        if action == "status" and method == "GET":        # is a background re-plan still running?
+            job = sched.jobs.get(cid) or {}
+            return self.json({"rebuilding": sched.busy(cid), "since": job.get("started")})
         if action == "refresh" and method == "POST":
             pool = sched.pool(ch, force=True)
             return self.json({"items": len(pool.items), "hours": round(pool.total_seconds / 3600, 1),

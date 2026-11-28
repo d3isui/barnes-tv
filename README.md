@@ -475,6 +475,15 @@ about 25 seconds after the TV stops watching.
   Windows, and NVENC, QSV or VAAPI on Linux.
 - **Direct file access** (Settings → Media access) is faster than streaming from Jellyfin when both apps run on the
   same box. Add path mappings if the paths Jellyfin reports differ from how this machine sees the files.
+- **Saving a channel is instant.** The schedule is re-planned on the server in the background. A note in the
+  bottom-left corner shows it's working, you can leave the page, and a message says when it's done. The library is
+  only re-read from Jellyfin when the change needs it: what plays, what's excluded, item types, length limits, filler,
+  commercial or bumper sources, or a time slot's show. Changes such as order, start times, break lengths or slot times
+  re-plan from the items already in hand, usually in well under a second.
+- **Startup doesn't wait for Jellyfin.** Each channel's last library list is kept on disk and used straight away, and
+  a fresh copy is fetched in the background (at most two channels at a time) when it's older than **Settings → Re-scan libraries every (hours)**.
+  Admin and TV pages never wait for a library query; they show what's planned so far. The music loudness check starts
+  two minutes after startup. `start.bat` and `start.sh` only run `pip install` when `requirements.txt` has changed.
 
 ## How it works
 

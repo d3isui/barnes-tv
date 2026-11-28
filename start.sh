@@ -7,8 +7,13 @@ if [ ! -x .venv/bin/python ]; then
   echo "Creating Python environment..."
   "$PY" -m venv .venv || { echo "Install python3-venv first (e.g. sudo apt install python3-venv)"; exit 1; }
 fi
-if ! .venv/bin/python -m pip install --disable-pip-version-check -q -r requirements.txt; then
-  echo "Some optional packages could not be installed; installing the essentials only (casting may be unavailable)."
-  .venv/bin/python -m pip install --disable-pip-version-check -q "Pillow>=10.1"
+# packages are only (re)installed when requirements.txt changed since the last successful install
+if ! cmp -s requirements.txt .venv/requirements.installed; then
+  if .venv/bin/python -m pip install --disable-pip-version-check -q -r requirements.txt; then
+    cp requirements.txt .venv/requirements.installed
+  else
+    echo "Some optional packages could not be installed; installing the essentials only (casting may be unavailable)."
+    .venv/bin/python -m pip install --disable-pip-version-check -q "Pillow>=10.1"
+  fi
 fi
 exec .venv/bin/python broadcast.py "$@"

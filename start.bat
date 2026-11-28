@@ -10,8 +10,13 @@ if not exist ".venv\Scripts\python.exe" (
   %PY% -m venv .venv || goto :nopython
 )
 ".venv\Scripts\python.exe" -c "import sys; print('Using Python ' + sys.version.split()[0])"
+rem packages are only (re)installed when requirements.txt changed since the last successful install
+fc /b requirements.txt ".venv\requirements.installed" >nul 2>nul
+if %errorlevel%==0 goto :run
+echo Installing Python packages...
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 goto :essentials
+copy /y requirements.txt ".venv\requirements.installed" >nul
 goto :run
 :essentials
 echo.

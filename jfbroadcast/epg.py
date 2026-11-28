@@ -59,13 +59,13 @@ def weather_entries(app, ch, t0, t1):
     return out
 
 
-def channel_entries(app, ch, t0, t1):
+def channel_entries(app, ch, t0, t1, wait=True):
     """What a channel shows between t0 and t1, as guide entries (shows folded together with their breaks)."""
     if ch.get("type") == "guide":
         return []
     if ch.get("type") == "weather":
         return weather_entries(app, ch, t0, t1)
-    return merged_programs(app.sched.entries_between(ch, t0, t1))
+    return merged_programs(app.sched.entries_between(ch, t0, t1, wait=wait))
 
 
 def merged_programs(entries):

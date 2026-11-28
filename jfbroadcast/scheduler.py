@@ -44,6 +44,18 @@ def schedule_hash(ch):
     return hashlib.sha1(json.dumps({k: ch.get(k) for k in SCHEDULE_KEYS}, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def pool_hash(ch):
+    """Fingerprint of the settings that decide what's fetched from Jellyfin. Other changes (order, start times,
+    break lengths, time slot times ...) re-plan the schedule from the items already in hand: no library query."""
+    br, bu = ch.get("breaks") or {}, ch.get("bumpers") or {}
+    d = {k: ch.get(k) for k in ("sources", "exclude", "item_types", "include_specials", "min_minutes", "max_minutes",
+                                "filler_sources", "type")}
+    d["breaks"] = {k: br.get(k) for k in ("enabled", "sources", "split", "split_over_seconds")}
+    d["bumpers"] = {k: bu.get(k) for k in ("enabled", "sources")}
+    d["slots"] = [[s.get("id"), s.get("sources"), bool(s.get("exclusive"))] for s in ch.get("slots") or []]
+    return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def local_offset(t):
     return time.localtime(t).tm_gmtoff
 
@@ -141,7 +153,8 @@ class Pool:
     """The playable items for one channel (cached on disk, refreshed periodically)."""
 
     def __init__(self, items=None, fillers=None, fetched=0, error="", commercials=None, bumpers=None, compilations=None,
-                 slots=None):
+                 slots=None, hash=""):
+        self.hash = hash
         self.items = items or []
         self.slots = slots or {}     # time slot id -> its items
         self.compilations = compilations or []
@@ -168,6 +181,10 @@ class ScheduleManager:
         self.states = {}
         self._glock = threading.Lock()
         self.splitter = None         # AdSplitter (set by the app)
+        self.jobs = {}               # channel id -> background rebuild after a settings change
+        self.refreshing = {}         # channel id -> time a background library refresh started
+        self._rlocks = {}
+        self._fetch_slots = threading.BoundedSemaphore(2)    # at most 2 channels query Jellyfin at once
 
     # ---------- helpers ----------
     def jellyfin(self):
@@ -262,12 +279,12 @@ class ScheduleManager:
             vbumpers = [c for c in self._resolve(jf, bu.get("sources") or [], ch, short_types)
                         if c["duration"] <= 5 * 60] if bu.get("enabled") and bu.get("sources") else []
             pool = Pool(items, fillers, time.time(), commercials=commercials, bumpers=vbumpers, compilations=compilations,
-                        slots=slots)
+                        slots=slots, hash=pool_hash(ch))
             _atomic_write(self._pool_path(cid), json.dumps({"items": items, "fillers": fillers, "fetched": pool.fetched,
                                                             "slots": slots,
                                                             "commercials": commercials, "bumpers": vbumpers,
                                                             "compilations": compilations,
-                                                            "hash": schedule_hash(ch)}))
+                                                            "hash": pool_hash(ch)}))
             log.info("channel %s (%s): %d items, %d fillers, %d commercials, %d video bumpers%s", ch["number"],
                      ch["name"], len(items), len(fillers), len(commercials), len(vbumpers),
                      f", {len(slots)} time slots ({sum(len(v) for v in slots.values())} items)" if slots else "")
@@ -276,7 +293,7 @@ class ScheduleManager:
             old = self.pools.get(cid) or self._load_pool(ch, any_hash=True)
             pool = Pool(old.items if old else [], old.fillers if old else [], old.fetched if old else 0, str(e),
                         old.commercials if old else [], old.bumpers if old else [], old.compilations if old else [],
-                        old.slots if old else {})
+                        old.slots if old else {}, hash=pool_hash(ch))
         self.pools[cid] = pool
         return pool
 
@@ -286,29 +303,121 @@ class ScheduleManager:
             return None
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
-            if not any_hash and d.get("hash") != schedule_hash(ch):
+            if not any_hash and d.get("hash") != pool_hash(ch):
                 return None
             return Pool(d["items"], d.get("fillers", []), d.get("fetched", 0), commercials=d.get("commercials", []),
-                        bumpers=d.get("bumpers", []), compilations=d.get("compilations", []), slots=d.get("slots") or {})
+                        bumpers=d.get("bumpers", []), compilations=d.get("compilations", []), slots=d.get("slots") or {},
+                        hash=d.get("hash", ""))
         except Exception:
             return None
 
+    def _rlock(self, cid):
+        with self._glock:
+            return self._rlocks.setdefault(cid, threading.Lock())
+
     def pool(self, ch, force=False):
+        """The channel's items. Waits for Jellyfin only when there's nothing usable yet (new channel, or its sources
+        changed); an out-of-date list keeps being used while a fresh one is fetched in the background."""
+        cid, h = ch["id"], pool_hash(ch)
+        p = self.pools.get(cid)
+        if p is not None and p.hash != h:
+            p = None
+        stale = False
+        if p is None and not force:
+            p = self._load_pool(ch)
+            if p:
+                self.pools[cid] = p
+                stale = self._compilations_changed(p)     # scanned since this list was saved (or still to scan)
+        if force or p is None:
+            with self._rlock(cid):                        # one fetch at a time per channel
+                q = self.pools.get(cid)
+                if not force and q is not None and q.hash == h:
+                    return q                              # someone else just fetched it
+                with self._fetch_slots:
+                    return self.refresh_pool(ch)
+        max_age = float(self.store.settings.get("library_refresh_hours") or 6) * 3600
+        if not p.items and not any(p.slots.values()):
+            max_age = 120   # empty channel: look again soon (sources may have just been added or scanned)
+        if stale or time.time() - p.fetched > max_age:
+            self._refresh_later(ch)
+        return p
+
+    def _refresh_later(self, ch):
         cid = ch["id"]
-        with self.lock(cid):
-            p = self.pools.get(cid)
-            if p is None and not force:
-                p = self._load_pool(ch)
-                if p:
-                    self.pools[cid] = p
-                    if self._compilations_changed(p):   # scanned since this pool was saved (or still to scan)
-                        force = True
-            max_age = float(self.store.settings.get("library_refresh_hours") or 6) * 3600
-            if p is not None and not p.items and not any(p.slots.values()):
-                max_age = 120   # empty channel: look again soon (sources may have just been added or scanned)
-            if force or p is None or time.time() - p.fetched > max_age:
-                p = self.refresh_pool(ch)
-            return p
+        with self._glock:
+            if time.time() - self.refreshing.get(cid, 0) < 90:      # running, or tried a moment ago
+                return
+            self.refreshing[cid] = time.time()
+
+        def run():
+            try:
+                with self._rlock(cid), self._fetch_slots:
+                    fresh = self.store.channel(cid) or ch
+                    before = self.pools.get(cid)
+                    p = self.refresh_pool(fresh)
+                if before is not None and not before.commercials and p.commercials:
+                    self.reset(fresh, keep_current=True)    # first commercials: plan breaks from now on
+            except Exception as e:
+                log.warning("background refresh of %s failed: %s", ch.get("name"), e)
+        threading.Thread(target=run, daemon=True, name=f"refresh-{cid}").start()
+
+    # ---------- background re-planning (after a settings change) ----------
+    def busy(self, cid):
+        job = self.jobs.get(cid)
+        return bool(job and job["thread"].is_alive())
+
+    MODES = ("fetch", "replan", "refresh", "now")
+
+    def rebuild_async(self, cid, on_done=None, mode="replan"):
+        """Re-plan a channel in the background. fetch: just read the library and plan ahead as usual (a web page
+        found nothing at hand); replan: after a settings change (re-reads the library only if
+        its sources changed); refresh: re-read the library, then re-plan after what's on; now: also replace what's
+        on. Calls arriving while one runs are folded into one more pass (the strongest mode wins)."""
+        with self._glock:
+            job = self.jobs.get(cid)
+            if job and job["thread"].is_alive():
+                job["again"] = True
+                job["cbs"].append(on_done)
+                job["mode"] = max(job["mode"], mode, key=self.MODES.index)
+                return
+            job = self.jobs[cid] = {"again": False, "cbs": [on_done], "started": time.time(), "mode": mode}
+            job["thread"] = threading.Thread(target=self._rebuild_job, args=(cid,), daemon=True, name=f"rebuild-{cid}")
+            job["thread"].start()
+
+    def _rebuild_job(self, cid):
+        while True:
+            ch = self.store.channel(cid)
+            with self._glock:
+                mode, self.jobs[cid]["mode"] = self.jobs[cid]["mode"], "fetch"
+            if ch:
+                try:
+                    t0 = time.time()
+                    if ch.get("type") not in ("guide", "weather"):
+                        if mode == "now":
+                            self.rebuild_now(ch)
+                        elif mode == "fetch":
+                            self.pool(ch)
+                            self.ensure(ch)
+                        else:
+                            self.pool(ch, force=mode == "refresh")    # library query (if needed), outside the lock
+                            self.reset(ch, keep_current=True)
+                    log.info("channel %s re-planned in %.1f s", ch.get("name"), time.time() - t0)
+                except Exception as e:
+                    log.warning("re-planning %s failed: %s", ch.get("name"), e)
+            with self._glock:
+                job = self.jobs[cid]
+                if job["again"]:
+                    job["again"] = False
+                    continue
+                cbs = job["cbs"]
+                del self.jobs[cid]
+            for cb in cbs:
+                try:
+                    if cb:
+                        cb()
+                except Exception as e:
+                    log.warning("after re-planning %s: %s", cid, e)
+            return
 
     # ---------- state ----------
     def _load_state(self, cid):
@@ -388,8 +497,8 @@ class ScheduleManager:
     def rebuild_now(self, ch, now=None):
         """Re-read the library and plan everything again starting this second (the current show included)."""
         cid = ch["id"]
-        now = now or time.time()
         self.pool(ch, force=True)
+        now = now or time.time()           # after the library query, which can take a while
         with self.lock(cid):
             st = self._load_state(cid)
             tl = st["timeline"]
@@ -462,7 +571,10 @@ class ScheduleManager:
     def breakdown(self, ch):
         """What the channel's pool is made of, per show: items, hours, share of the pool, the share of airtime the
         balancing aims for, and what the schedule actually holds for the next few days."""
-        pool = self.pool(ch)
+        pool = self._pool_ready(ch)
+        if pool is None:                       # still being read from Jellyfin
+            self.rebuild_async(ch["id"], mode="fetch")
+            return {"groups": [], "balanced": balance_on(ch), "strength": 0, "scheduled_hours": 0, "loading": True}
         groups = {}
         for i in pool.items:
             groups.setdefault(group_key(i), []).append(i)
@@ -470,7 +582,7 @@ class ScheduleManager:
         total_s, total_n = sum(secs.values()) or 1, sum(len(v) for v in groups.values()) or 1
         target = target_shares(secs, ch.get("balance")) if balance_on(ch) else {k: v / total_s for k, v in secs.items()}
         aired, now = {}, time.time()
-        for e in self.ensure(ch):
+        for e in self.entries_between(ch, now, now + 8 * 86400, wait=False):
             if e["k"] == "program" and e.get("i") and e["s"] + e["d"] > now:
                 k = group_key(e["i"])
                 aired[k] = aired.get(k, 0) + e["d"]
@@ -570,10 +682,15 @@ class ScheduleManager:
 
     @staticmethod
     def _lru_pick(candidates, history, key=lambda c: c["id"]):
-        """Random pick among the least recently used third of the candidates."""
+        """Random pick among the least recently used third of the candidates (fast path for big libraries:
+        anything not played recently at all is fair game, no sorting needed)."""
         last = {k: n for n, k in enumerate(history)}
-        ordered = sorted(candidates, key=lambda c: last.get(key(c), -1))
-        choice = random.choice(ordered[:max(1, len(ordered) // 3)])
+        fresh = [c for c in candidates if key(c) not in last]
+        if fresh and len(fresh) >= max(1, len(candidates) // 3):
+            choice = random.choice(fresh)
+        else:
+            ordered = sorted(candidates, key=lambda c: last.get(key(c), -1))
+            choice = random.choice(ordered[:max(1, len(ordered) // 3)])
         history.append(key(choice))
         del history[:-200]
         return choice
@@ -895,8 +1012,8 @@ class ScheduleManager:
 
     def slots_info(self, ch):
         """For the admin page: what each slot found in Jellyfin and its next airings."""
-        pool = self.pool(ch)
-        tl = self.ensure(ch)
+        pool = self._pool_ready(ch) or Pool()
+        tl = self.entries_between(ch, time.time() - 86400, time.time() + 9 * 86400, wait=False)
         now = time.time()
         out = []
         for sl in clean_slots(ch.get("slots")):
@@ -924,8 +1041,20 @@ class ScheduleManager:
         return out
 
     # ---------- the main entry point ----------
-    def ensure(self, ch, now=None):
-        """Make sure the channel's timeline covers now .. now + schedule_days. Returns the timeline."""
+    def _pool_ready(self, ch):
+        """The channel's items if they're at hand (memory or disk) without asking Jellyfin, else None."""
+        p = self.pools.get(ch["id"])
+        if p is not None and p.hash == pool_hash(ch):
+            return p
+        p = self._load_pool(ch)
+        if p is not None:
+            self.pools[ch["id"]] = p
+        return p
+
+    def ensure(self, ch, now=None, quick=False):
+        """Make sure the channel's timeline covers now .. now + schedule_days. Returns the timeline.
+        quick=True (web pages): never wait for Jellyfin; if planning needs a library query first, answer with what's
+        planned so far and let a background job do the rest."""
         if ch.get("type") in ("guide", "weather"):
             return []
         cid = ch["id"]
@@ -943,21 +1072,28 @@ class ScheduleManager:
                 st.pop("deferred", None)
                 st["hash"] = h
             tl = st["timeline"]
-            self._note_slot_airings(st, now)
+            if ch.get("slots") or st.get("slot_aired"):
+                self._note_slot_airings(st, now)
             tl[:] = [e for e in tl if e["s"] + e["d"] > now - KEEP_PAST]
             # the channel was empty before (no sources yet, or Jellyfin unreachable) but now has media: replace
             # the "no programming" placeholders right away instead of waiting for them to run out
-            if any(is_placeholder(e) and e["s"] + e["d"] > now for e in tl) and self.pool(ch).items:
-                tl[:] = keep_through_current(tl, now)
-                log.info("channel %s now has programming; replacing placeholders", ch["name"])
             horizon = now + float(self.store.settings.get("schedule_days") or 3) * 86400
-            if ch.get("slots"):          # plan far enough ahead to include upcoming marathons (up to 8 days)
+            if any(x.get("kind") == "marathon" for x in ch.get("slots") or []):   # plan far enough ahead for marathons
                 runs = [o["end"] for o in all_occurrences([x for x in clean_slots(ch["slots"]) if x["kind"] == "marathon"],
                                                           now, now + 8 * 86400)]
                 horizon = max([horizon] + [min(e, now + 8 * 86400) for e in runs])
-            if tl and tl[-1]["s"] + tl[-1]["d"] >= horizon - 3600:
+            placeholders = any(is_placeholder(e) and e["s"] + e["d"] > now for e in tl)
+            if not placeholders and tl and tl[-1]["s"] + tl[-1]["d"] >= horizon - 3600:
+                return list(tl)                          # planned far enough ahead already
+            if quick and self._pool_ready(ch) is None:   # needs a library query: not on a web page's time
+                self.rebuild_async(cid, mode="fetch")
                 return list(tl)
             pool = self.pool(ch)
+            if placeholders and pool.items:
+                tl[:] = keep_through_current(tl, now)
+                log.info("channel %s now has programming; replacing placeholders", ch["name"])
+            if tl and tl[-1]["s"] + tl[-1]["d"] >= horizon - 3600:
+                return list(tl)
             pad = int(ch.get("padding_minutes") or 0)
             t = tl[-1]["s"] + tl[-1]["d"] if tl else None
             if t is None or t < now - 3600:
@@ -1059,7 +1195,17 @@ class ScheduleManager:
                 return mid, e
         return None, None
 
-    def entries_between(self, ch, t0, t1):
+    def entries_between(self, ch, t0, t1, wait=True):
+        """wait=False (web pages): if the channel is busy being planned, answer from what's planned so far."""
+        if not wait:
+            lk = self.lock(ch["id"])
+            if self.busy(ch["id"]) or not lk.acquire(timeout=0.25):
+                st = self.states.get(ch["id"]) or {}
+                return [e for e in list(st.get("timeline") or []) if e["s"] + e["d"] > t0 and e["s"] < t1]
+            try:
+                return [e for e in self.ensure(ch, quick=True) if e["s"] + e["d"] > t0 and e["s"] < t1]
+            finally:
+                lk.release()
         return [e for e in self.ensure(ch) if e["s"] + e["d"] > t0 and e["s"] < t1]
 
     def next_program(self, ch, after_t):

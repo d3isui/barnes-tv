@@ -250,6 +250,18 @@ class App:
         return [st.get("bumper_music_path")] + [c.get("music_path") for c in self.store.channels()] + \
                [b.get("music_path") for b in self.store.bumpers()]
 
+    def _music_scan(self):
+        """Look for new music to measure (bumper/guide/weather beds). Waits a couple of minutes after startup so it
+        doesn't compete with getting the channels on the air, then checks every 30 minutes."""
+        self.stop_evt.wait(120)
+        while not self.stop_evt.is_set():
+            if self.store.settings.get("music_match_loudness", True):
+                try:
+                    loudness.prewarm(self.music_paths())
+                except Exception as e:
+                    log.warning("music loudness scan failed: %s", e)
+            self.stop_evt.wait(1800)
+
     def start_maintenance(self):
         loudness.init(self.store.data_dir / "cache" / "music-loudness.json", self.ffmpeg_path)
         threading.Thread(target=self._maintain, daemon=True, name="maintenance").start()
@@ -257,13 +269,9 @@ class App:
 
     def _maintain(self):
         time.sleep(3)
+        threading.Thread(target=self._music_scan, daemon=True, name="music-scan").start()
         while not self.stop_evt.is_set():
             st = self.store.settings
-            if st.get("music_match_loudness", True):
-                try:
-                    loudness.prewarm(self.music_paths())       # measure new music in the background
-                except Exception as e:
-                    log.warning("music loudness scan failed: %s", e)
             if st.get("jellyfin_api_key"):
                 for ch in self.store.channels():
                     if ch.get("type") in ("guide", "weather") or not ch.get("enabled", True):
