@@ -43,7 +43,8 @@ ffmpeg that already comes with Jellyfin.
 - A channel logo ("bug") and a clock in any corner, with one-click styles from Japanese broadcast to VCR 7-segment.
 - An "Up next" banner, burned-in subtitles, per-channel audio language and loudness leveling.
 - A **guide channel** with a scrolling grid of every channel and a "Now On" spotlight.
-- A **weather channel** with current conditions, forecasts, radar loops, future radar and severe weather alerts.
+- A **weather channel** with current conditions, forecasts, radar loops you can zoom in or out, future radar and
+  severe weather alerts.
 - Sleep channels that turn the screen black while the sound plays on.
 
 **📡 Watch anywhere**

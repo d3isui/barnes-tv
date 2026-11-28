@@ -290,6 +290,8 @@ NWS_STEPS = ((5, (4, 233, 231)), (10, (1, 159, 244)), (15, (3, 0, 244)), (20, (2
              (30, (0, 142, 0)), (35, (253, 248, 2)), (40, (229, 188, 0)), (45, (253, 149, 0)), (50, (253, 0, 0)),
              (55, (212, 0, 0)), (60, (188, 0, 0)), (65, (248, 0, 253)), (70, (152, 84, 198)), (75, (253, 253, 253)))
 RADAR_MIN_DBZ = 10           # default: hides clear-air static, keeps drizzle and light snow
+RADAR_DATA_ZOOM = 7          # radar pictures are fetched at most at this zoom (finer data doesn't exist / isn't free)
+ZOOM_RANGE = {"local": (4, 10), "regional": (3, 8), "future": (4, 9)}
 _pal_img = Image.new("P", (1, 1))
 _pal_img.putpalette(IEM_PALETTE)
 
@@ -397,7 +399,18 @@ class Radar:
 
     def layer(self, frame, lat, lon, z, w, h, stop=None, min_dbz=RADAR_MIN_DBZ):
         """One radar frame drawn for this map: an RGBA layer, or None if no tile came back.
-        frame = {"time", "kind": past|future, "key", "url": template with {z} {x} {y}, "gap": seconds between tiles}"""
+        frame = {"time", "kind": past|future, "key", "url": template with {z} {x} {y}, "gap": seconds between tiles}
+        Zoomed in past RADAR_DATA_ZOOM, the radar is fetched at that zoom for the smaller area and enlarged (the map
+        underneath still gets sharper)."""
+        if z > RADAR_DATA_ZOOM:
+            k = 2 ** (z - RADAR_DATA_ZOOM)
+            sw, sh = math.ceil(w / k) + 2, math.ceil(h / k) + 2
+            small = self.layer(frame, lat, lon, RADAR_DATA_ZOOM, sw, sh, stop, min_dbz)
+            if small is None:
+                return None
+            big = small.resize((sw * k, sh * k), Image.BILINEAR)
+            ox, oy = (sw * k - w) // 2, (sh * k - h) // 2
+            return big.crop((ox, oy, ox + w, oy + h))
         cx, cy = world_px(lat, lon, z)
         x0, y0, tiles = self._tiles(cx, cy, w, h)
         n = 2 ** z
@@ -588,6 +601,13 @@ class WeatherService:
                         pass
         now = time.time()
         lat, lon = loc["lat"], loc["lon"]
+        # radar settings changed (zoom, filtering, loop length, screens): fetch new maps now, not at the next refresh
+        sig = json.dumps([cfg.get(x) for x in ("radar_zoom_local", "radar_zoom_regional", "radar_zoom_future",
+                                               "radar_min_dbz", "radar_frames", "slides")], default=str)
+        if st.get("radar_sig") != sig:
+            if st.get("radar_sig") is not None:
+                st["at"]["radar"] = 0
+            st["radar_sig"] = sig
 
         def get_forecast():
             try:
@@ -638,7 +658,8 @@ class WeatherService:
             for name, z, wanted in jobs:
                 if name != "future" and ("radar_" + name) not in slides:
                     continue
-                z = max(3, min(7, z))
+                lo, hi = ZOOM_RANGE.get(name, (3, 7))
+                z = max(lo, min(hi, z))
                 old = st["radar"].get(name) or {}
                 base = old.get("base") if old.get("zoom") == z and old.get("base") is not None and \
                     old.get("base_size") == (w, h, style) and not self.radar.map_error else None

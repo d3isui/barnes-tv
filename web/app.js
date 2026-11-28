@@ -380,6 +380,12 @@ async function showChannel(id) {
       <div class="wide"><h3>Screens, in order</h3><div class="row">${WX_SLIDES.map(([k, l]) =>
         `<label class="check"><input type="checkbox" data-wxslide="${k}" ${(WX.slides || WX_SLIDES.map((x) => x[0])).includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div></div>
       <label class="f">Seconds per screen<input type="number" id="wx_secs" min="5" max="60" value="${WX.slide_seconds || 10}"></label>
+      <div class="wide zooms"><h3>Radar maps: how far in or out</h3><div class="zoomgrid">
+        ${[["local", "Local radar", 4, 10, 7], ["regional", "Regional radar", 3, 8, 5], ["future", "Future radar", 4, 9, 6]].map(([k, l, lo, hi, d]) =>
+          `<label class="f">${l}: <b data-zv="${k}"></b><input type="range" id="wx_z_${k}" min="${lo}" max="${hi}" step="1" value="${+WX["radar_zoom_" + k] || d}">
+           <span class="row sub" style="justify-content:space-between"><span>zoomed out</span><span>zoomed in</span></span></label>`).join("")}</div>
+        <p class="sub" style="margin:0">Zoomed in closer than the standard local view, the street map keeps getting sharper while the radar
+          picture is enlarged (radar services don't offer finer detail). After you save, the new maps are fetched straight away and show within a minute.</p></div>
       <label class="f">Radar loop length<select id="wx_frames">${[3, 6, 9, 12].map((n) => `<option value="${n}" ${(WX.radar_frames || 6) === n ? "selected" : ""}>${n * 10} minutes</option>`).join("")}</select></label>
       <label class="f">Radar: hide weak echoes (US)<select id="wx_mindbz">${[["all", "Show everything (raw, incl. clear-air static)"], [5, "Below 5 dBZ"],
         [10, "Below 10 dBZ (recommended)"], [15, "Below 15 dBZ"], [20, "Below 20 dBZ (rain only)"]].map(([v, l]) =>
@@ -619,6 +625,7 @@ async function showChannel(id) {
           name: $("#wx_name").value.trim() },
         units: $("#wx_units").value, slides: $$("[data-wxslide]").filter((x) => x.checked).map((x) => x.dataset.wxslide),
         slide_seconds: Math.max(5, +$("#wx_secs").value || 10), radar_frames: +$("#wx_frames").value, alerts: $("#wx_alerts").checked,
+        radar_zoom_local: +$("#wx_z_local").value, radar_zoom_regional: +$("#wx_z_regional").value, radar_zoom_future: +$("#wx_z_future").value,
         radar_min_dbz: $("#wx_mindbz").value === "all" ? "all" : +$("#wx_mindbz").value,
         crawl: $("#wx_crawl").checked, crawl_speed: +$("#wx_speed").value };
       d.clock = { ...clock, format: $("#guide_clock_fmt").value };
@@ -744,6 +751,22 @@ async function showChannel(id) {
     img.src = `/api/channels/${ch.id}/preview.jpg?t=${Date.now()}` + ($("#pv_slide") ? "&slide=" + $("#pv_slide").value : "");
   };
   if (weather) {
+    // radar zoom sliders: say roughly how much ground each map covers (depends on the output resolution and latitude)
+    let zoomLat = +WXL.lat || 38, mapW = 1176;
+    const zoomText = () => $$("[data-zv]").forEach((el) => {
+      const z = +$(`#wx_z_${el.dataset.zv}`).value;
+      const miles = mapW / (512 * 2 ** z) * 360 * 69.17 * Math.cos(zoomLat * Math.PI / 180);
+      const metric = ($("#wx_units")?.value || WX.units) === "metric";
+      const v = metric ? miles * 1.609 : miles, u = metric ? "km" : "miles";
+      el.textContent = `about ${v >= 100 ? Math.round(v / 10) * 10 : Math.round(v)} ${u} across` + (z > 7 ? " (radar enlarged)" : "");
+    });
+    $$("[id^=wx_z_]").forEach((r) => r.addEventListener("input", zoomText));
+    api("GET", "settings").then((st) => {
+      const [w, h] = String(st.resolution || "1280x720").split("x").map(Number);
+      if (w && h) mapW = w - 104 * (h / 720);
+      zoomText();
+    }).catch(zoomText);
+    zoomText();
     const modeVis = () => $$(".wxm").forEach((el) => (el.style.display = el.dataset.m === $("#wx_mode").value ? "" : "none"));
     $("#wx_mode").addEventListener("change", modeVis); modeVis();
     $("#wx_check").onclick = async () => {
@@ -751,6 +774,7 @@ async function showChannel(id) {
       try {
         const r = await api("GET", `channels/${ch.id}/weather`);
         if (!r.location) throw new Error(r.error || "Couldn't find the location");
+        if (r.location.lat) { zoomLat = +r.location.lat; zoomText(); }
         const L = r.location;
         $("#wx_result").innerHTML = `📍 <b>${esc(L.name)}${L.region ? ", " + esc(L.region) : ""}</b> ${esc(L.country || "")} (${L.lat.toFixed(2)}, ${L.lon.toFixed(2)}, from ${esc(L.source)})` +
           (r.now ? ` · now <b>${esc(r.now)}</b>` : "") + (r.alerts ? ` · ⚠ ${r.alerts} alert(s)` : "") +

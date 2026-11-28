@@ -502,6 +502,11 @@ through these screens (tick the ones you want on its **Weather** tab):
   postal code** (with its 2-letter country code), a **city name**, or **exact coordinates**, and give it the name you
   want shown. Click **📍 Check location & weather** to see what it found.
 - **Units:** automatic (°F, mph and inches in the US; °C, km/h and hPa elsewhere) or your choice.
+- **Radar maps: how far in or out**: a zoom slider each for the local, regional and future radar, with a live
+  "about 90 miles across" reading as you slide. Local radar goes from about 2,800 miles across down to about 45 (at
+  720p; higher output resolutions show a little more). Zoomed in closer than the standard local view (about 350 miles),
+  the street map keeps getting sharper while the radar picture is enlarged, because the radar services don't offer
+  finer detail. After you save, the new maps are fetched straight away and show within a minute.
 - **Seconds per screen** and **Radar loop length** (30 minutes to 2 hours).
 - **Radar: hide weak echoes** (US). Most nights, and on calm days, the radars run in a sensitive "clear-air" mode and
   pick up bugs, birds, dust and temperature layers. Unfiltered, that shows up as grey-blue static across the map and
@@ -527,8 +532,7 @@ Weather Service, radar and forecast radar from NOAA via the
 [RainViewer](https://www.rainviewer.com) elsewhere, and maps from OpenStreetMap / CARTO. All are free for personal use,
 and each is credited on screen. Forecasts refresh every 10 minutes, and alerts and radar every 5. Each radar refresh
 only downloads the newest picture, and a failed refresh tries again within 2 minutes. If the internet drops, the
-channel keeps showing the last good forecast. Radar zoom is limited to level 7, so local radar covers an area about
-350 miles across and regional radar about 1,400.
+channel keeps showing the last good forecast.
 
 ---
 
